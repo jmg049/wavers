@@ -2,17 +2,13 @@
 name = "wavers"
 version = "0.1.0"
 edition = "2021"
-panic = "abort"
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 byteorder = "1.4.3"
 criterion = "0.4.0"
 memmap2 = "0.5.10"
-
-[[bench]]
-name = "main"
-harness = false
+ndarray = "0.15.6"
+pyo3 = "0.18.1"
 
 [profile.release]
 debug = true

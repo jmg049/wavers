@@ -1,9 +1,9 @@
+use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use memmap2::MmapOptions;
+use std::io::Write;
 use std::{fs::File, io::Read, path::Path};
 
-use byteorder::{ByteOrder, LittleEndian};
-use memmap2::MmapOptions;
-
-use crate::WavHeader;
+use crate::{WavHeader, PCM_16};
 
 pub fn read_wav_i16(file_path: &Path) -> Result<(WavHeader, Vec<i16>), std::io::Error> {
     let mut fp: File = File::open(file_path)?;
@@ -57,3 +57,82 @@ fn ieee_f32_tp_pcm_16(data: &[f32]) -> Vec<i16> {
     }
     dst
 }
+
+pub fn write_pcm_i16(
+    file_path: &Path,
+    data: &[i16],
+    sample_rate: i32,
+    n_channels: i16,
+) -> Result<(), std::io::Error> {
+    println!("Data Size : {:?}", data.len());
+    let mut f_out: File = File::create(file_path)?;
+    let byte_rate = sample_rate * n_channels as i32 * (16 / 2) as i32;
+    let header: WavHeader = WavHeader::new(
+        36 + data.len() as i32,
+        16,
+        PCM_16,
+        n_channels,
+        sample_rate,
+        byte_rate,
+        n_channels * (16 / 2),
+        PCM_16,
+        data.len() as i32 * 16 as i32,
+    );
+
+    let header_bytes = header.as_bytes();
+    File::write_all(&mut f_out, header_bytes)?;
+    for sample in data.iter() {
+        f_out.write_i16::<LittleEndian>(*sample)?;
+    }
+    Ok(())
+}
+
+// pub struct WavWriterOptionsBuilder<T> {
+
+//     audio_format: i16,
+//     n_channels: i16,
+//     sample_rate: i32,
+//     bits_per_sample: i16,
+// }
+
+// impl<T> WavWriterOptionsBuilder<T> {
+
+//     pub fn new(data: Vec<i16>) -> WavWriterOptionsBuilder<T> {
+
+//         WavWriterOptionsBuilder { audio_format: PCM_16, n_channels: (), sample_rate: (), bits_per_sample: () }
+//     }
+
+//     pub fn audio_format(&mut self, audio_format: i16) -> WavWriterOptions {
+//         self.audio_format = audio_format;
+//         self
+//     }
+//     pub fn n_channels(&mut self, n_channels: i16) -> WavWriterOptions {
+//         self.n_channels = n_channels;
+//         self
+//     }
+//     pub fn sample_rate(&mut self, sample_rate: i32) -> WavWriterOptions {
+//         self.sample_rate = sample_rate;
+//         self
+//     }
+//     pub fn bits_per_sample(&mut self, bits_per_sample: i16) -> WavWriterOptions {
+//         self.bits_per_sample = bits_per_sample;
+//         self
+//     }
+
+//     pub fn build(&self) -> WavWriterOptions {
+//         WavWriterOptions::new(self.audio_format, self.n_channels, self.sample_rate, self.bits_per_sample)
+//     }
+// }
+
+// pub struct WavWriterOptions {
+//    audio_format: i16,
+//     n_channels: i16,
+//     sample_rate: i32,
+//     bits_per_sample: i16,
+// }
+
+// impl WavWriterOptions {
+//     pub fn new(audio_format: i16, n_channels: i16, sample_rate: i32, bits_per_sample: i16) -> WavWriterOptions {
+//         WavWriterOptions { audio_format, n_channels, sample_rate, bits_per_sample }
+//     }
+// }

@@ -8,8 +8,6 @@ pub const FMT: [u8; 4] = ['F' as u8, 'M' as u8, 'T' as u8, ' ' as u8];
 pub const WAVE: [u8; 4] = ['W' as u8, 'A' as u8, 'V' as u8, 'E' as u8];
 pub const PCM_16: i16 = 0x01;
 
-
-
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 #[pyclass]
@@ -20,8 +18,8 @@ pub struct WavHeader {
     sub_chunk_id: [u8; 4], // 4
     sub_chunk_size: i32,   // 4
     audio_format: i16,     // 2
-    pub n_channels: i16,       // 2
-    pub sample_rate: i32,      // 4
+    pub n_channels: i16,   // 2
+    pub sample_rate: i32,  // 4
     byte_rate: i32,        // 4
     block_align: i16,      // 2
     bits_per_sample: i16,  // 2

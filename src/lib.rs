@@ -18,7 +18,7 @@ mod tests {
 
     use crate::{
         sample::SampleType, signal_channels, signal_duration, signal_sample_rate, wave::WavFile,
-        write_wav_as, SignalInfo, signal_info
+        write_wav_as, signal_info
     };
 
     #[test]
@@ -116,14 +116,14 @@ mod tests {
             Array2::from_shape_vec((data_vec.len(), 1), data_vec).unwrap();
         let f32_data = wav_file.read(Some(SampleType::F32(0.0)));
 
-        let mut idx = 0;
+        let mut _idx = 0;
         for (expected, actual) in std::iter::zip(expected_output, f32_data) {
             let sample: f64 = match actual {
                 SampleType::F32(f) => f as f64,
                 _ => panic!("Expected F32"),
             };
             assert_approx_eq!(expected as f64, sample, 0.0001);
-            idx += 1;
+            _idx += 1;
         }
     }
 
@@ -171,7 +171,7 @@ mod tests {
         );
         let test_f32_data = test_wav_file.read(Some(SampleType::F32(0.0)));
 
-        let mut idx = 0;
+        let mut _idx = 0;
         for (_expected, actual) in std::iter::zip(test_f32_data, f32_data) {
             let expected_sample: f64 = match actual {
                 SampleType::F32(f) => f as f64,
@@ -183,7 +183,7 @@ mod tests {
                 _ => panic!("Expected F32"),
             };
             assert_approx_eq!(expected_sample, actual_sample, 0.0001);
-            idx += 1;
+            _idx += 1;
         }
     }
 
@@ -285,14 +285,14 @@ mod tests {
             Array2::from_shape_vec((data_vec.len() / 2, 2), data_vec).unwrap();
         let f32_data = wav_file.read(Some(SampleType::F32(0.0)));
 
-        let mut idx = 0;
+        let mut _idx = 0;
         for (expected, actual) in std::iter::zip(expected_output, f32_data) {
             let sample: f64 = match actual {
                 SampleType::F32(f) => f as f64,
                 _ => panic!("Expected F32"),
             };
             assert_approx_eq!(expected as f64, sample, 0.0001);
-            idx += 1;
+            _idx += 1;
         }
     }
 
@@ -340,7 +340,7 @@ mod tests {
         );
         let test_f32_data = test_wav_file.read(Some(SampleType::F32(0.0)));
 
-        let mut idx = 0;
+        let mut _idx = 0;
         for (expected, actual) in std::iter::zip(test_f32_data, f32_data) {
             let expected_sample: f64 = match expected {
                 SampleType::F32(f) => f as f64,
@@ -352,7 +352,7 @@ mod tests {
                 _ => panic!("Expected F32"),
             };
             assert_approx_eq!(expected_sample, actual_sample, 0.0001);
-            idx += 1;
+            _idx += 1;
         }
     }
 

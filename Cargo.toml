@@ -5,27 +5,19 @@ edition = "2021"
 
 [dev-dependencies]
 approx_eq = "0.1.8"
-
-[dependencies]
 criterion = "0.4.0"
 
-byteorder = "1.4.3"
+[dependencies]
 itertools = "0.10.5"
 ndarray = "0.15.6"
 num-traits = "0.2.15"
 numpy = "0.18.0"
 pyo3 = "0.18.1"
 rayon = "1.7.0"
-rustc-hash = "1.1.0"
 
 [profile.release]
-debug = true
+# debug = true
 panic = "abort"
 
 [profile.profiling]
 inherits = "release"
-
-
-[[bench]]
-name = "bench_i16"
-harness = false

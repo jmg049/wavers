@@ -220,9 +220,9 @@ impl WavFile {
     fn read_pcm_i32(&self) -> Array2<SampleType> {
         let n_channels = self.fmt_chunk.channels as usize;
         let mut channel_data: Vec<SampleType> =
-            Vec::with_capacity((self.data.len() / 2) - self.seek_pos as usize);
+            Vec::with_capacity((self.data.len() / 4) - self.seek_pos as usize); // divide by 4 because 4 bytes per sample
         unsafe {
-            channel_data.set_len((self.data.len() / 2) - self.seek_pos as usize);
+            channel_data.set_len((self.data.len() / 4) - self.seek_pos as usize);
         }
         let mut idx = 0;
 
@@ -257,9 +257,9 @@ impl WavFile {
     fn read_ieee_f32(&self) -> Array2<SampleType> {
         let n_channels = self.fmt_chunk.channels as usize;
         let mut channel_data: Vec<SampleType> =
-            Vec::with_capacity((self.data.len() / 2) - self.seek_pos as usize);
+            Vec::with_capacity((self.data.len() / 4) - self.seek_pos as usize); // divide by 4 because 4 bytes per sample
         unsafe {
-            channel_data.set_len((self.data.len() / 2) - self.seek_pos as usize);
+            channel_data.set_len((self.data.len() / 4) - self.seek_pos as usize);
         }
         let mut idx = 0;
 
@@ -294,9 +294,9 @@ impl WavFile {
     fn read_ieee_f64(&self) -> Array2<SampleType> {
         let n_channels = self.fmt_chunk.channels as usize;
         let mut channel_data: Vec<SampleType> =
-            Vec::with_capacity((self.data.len() / 2) - self.seek_pos as usize);
+            Vec::with_capacity((self.data.len() / 8) - self.seek_pos as usize); // divide by 8 because 8 bytes per sample
         unsafe {
-            channel_data.set_len((self.data.len() / 2) - self.seek_pos as usize);
+            channel_data.set_len((self.data.len() / 8) - self.seek_pos as usize);
         }
         let mut idx = 0;
 

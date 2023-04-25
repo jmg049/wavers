@@ -193,7 +193,7 @@ impl WavFile {
                 unsafe {
                     for channel_sample in samples.as_chunks_unchecked::<2>() {
                         channel_data[idx] =
-                            SampleType::I16(i16::from_le_bytes(*channel_sample));
+                            SampleType::I16(i16::from_ne_bytes(*channel_sample));
                         idx += 1;
                     }
                 }
@@ -231,7 +231,7 @@ impl WavFile {
         for samples in self.data.chunks(iter_step) {
             for channel_sample in samples.chunks(std::mem::size_of::<i32>()) {
                 channel_data[idx] =
-                    SampleType::I32(i32::from_le_bytes(channel_sample.try_into().unwrap()));
+                    SampleType::I32(i32::from_ne_bytes(channel_sample.try_into().unwrap()));
                 idx += 1;
             }
         }
@@ -268,7 +268,7 @@ impl WavFile {
         for samples in self.data.chunks(iter_step) {
             for channel_sample in samples.chunks(std::mem::size_of::<f32>()) {
                 channel_data[idx] =
-                    SampleType::F32(f32::from_le_bytes(channel_sample.try_into().unwrap()));
+                    SampleType::F32(f32::from_ne_bytes(channel_sample.try_into().unwrap()));
                 idx += 1;
             }
         }
@@ -305,7 +305,7 @@ impl WavFile {
         for samples in self.data.chunks(iter_step) {
             for channel_sample in samples.chunks(std::mem::size_of::<f64>()) {
                 channel_data[idx] =
-                    SampleType::F32(f32::from_le_bytes(channel_sample.try_into().unwrap()));
+                    SampleType::F32(f32::from_ne_bytes(channel_sample.try_into().unwrap()));
                 idx += 1;
             }
         }
@@ -389,7 +389,7 @@ pub fn signal_duration(signal_fp: &Path) -> Result<u64, std::io::Error> {
     br.seek(SeekFrom::Start(data_offset as u64))?;
     br.read_exact(&mut data_size_buf)?;
 
-    Ok(i32::from_le_bytes(data_size_buf) as u64
+    Ok(i32::from_ne_bytes(data_size_buf) as u64
         / (fmt_chunk.sample_rate()
             * fmt_chunk.channels() as i32
             * (fmt_chunk.bits_per_sample() / 8) as i32) as u64)
@@ -455,7 +455,7 @@ pub fn signal_info(signal_fp: &Path) -> Result<SignalInfo, std::io::Error> {
         fmt_chunk.sample_rate(),
         fmt_chunk.channels(),
         fmt_chunk.bits_per_sample(),
-        i32::from_le_bytes(data_size_buf) as u64
+        i32::from_ne_bytes(data_size_buf) as u64
             / (fmt_chunk.sample_rate()
                 * fmt_chunk.channels() as i32
                 * (fmt_chunk.bits_per_sample() / 8) as i32) as u64,
@@ -654,25 +654,25 @@ impl FmtChunk {
         let (offset, _) = find_sub_chunk_id(br, b"fmt ")?;
         br.seek(SeekFrom::Start(offset as u64))?;
         br.read_exact(&mut buf)?;
-        let size = i32::from_le_bytes(buf);
+        let size = i32::from_ne_bytes(buf);
 
         br.read_exact(&mut buf_two)?;
-        let format = u16::from_le_bytes(buf_two);
+        let format = u16::from_ne_bytes(buf_two);
 
         br.read_exact(&mut buf_two)?;
-        let channels = u16::from_le_bytes(buf_two);
+        let channels = u16::from_ne_bytes(buf_two);
 
         br.read_exact(&mut buf)?;
-        let sample_rate = i32::from_le_bytes(buf);
+        let sample_rate = i32::from_ne_bytes(buf);
 
         br.read_exact(&mut buf)?;
-        let byte_rate = i32::from_le_bytes(buf);
+        let byte_rate = i32::from_ne_bytes(buf);
 
         br.read_exact(&mut buf_two)?;
-        let block_align = u16::from_le_bytes(buf_two);
+        let block_align = u16::from_ne_bytes(buf_two);
 
         br.read_exact(&mut buf_two)?;
-        let bits_per_sample = u16::from_le_bytes(buf_two);
+        let bits_per_sample = u16::from_ne_bytes(buf_two);
         br.seek(SeekFrom::Start(0))?;
         Ok(FmtChunk::new(
             size,

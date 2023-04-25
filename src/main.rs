@@ -1,21 +1,32 @@
+#![feature(slice_as_chunks)]
+
+pub mod sample;
 pub mod wave;
 
-use std::{fs::File, io::Write, path::Path};
+use std::path::Path;
+use wave::WavFile;
+use criterion::black_box;
 
-use wave::{overlapping_chunks, WavFile};
+const FILES: [&'static str; 20] = ["./resources/quickstart_genspeech/LPCNet_listening_test/mfall/dir1/ref.wav","./resources/quickstart_genspeech/LPCNet_listening_test/mfall/dir1/lpcnq.wav",
+"./resources/quickstart_genspeech/LPCNet_listening_test/vec18/dir1/ref.wav","./resources/quickstart_genspeech/LPCNet_listening_test/vec18/dir1/lpcnq.wav",
+"./resources/quickstart_genspeech/LPCNet_listening_test/mfall/dir2/ref.wav","./resources/quickstart_genspeech/LPCNet_listening_test/mfall/dir2/lpcnq.wav",
+"./resources/quickstart_genspeech/LPCNet_listening_test/vec18/dir2/ref.wav","./resources/quickstart_genspeech/LPCNet_listening_test/vec18/dir2/lpcnq.wav",
+"./resources/quickstart_genspeech/LPCNet_listening_test/mfall/dir3/ref.wav","./resources/quickstart_genspeech/LPCNet_listening_test/mfall/dir3/lpcnq.wav",
+"./resources/quickstart_genspeech/LPCNet_listening_test/vec18/dir3/ref.wav","./resources/quickstart_genspeech/LPCNet_listening_test/vec18/dir3/lpcnq.wav",
+"./resources/quickstart_genspeech/LPCNet_listening_test/mfall/dir4/ref.wav","./resources/quickstart_genspeech/LPCNet_listening_test/mfall/dir4/lpcnq.wav",
+"./resources/quickstart_genspeech/LPCNet_listening_test/vec18/dir4/ref.wav","./resources/quickstart_genspeech/LPCNet_listening_test/vec18/dir4/lpcnq.wav",
+"./resources/quickstart_genspeech/LPCNet_listening_test/mfall/dir5/ref.wav","./resources/quickstart_genspeech/LPCNet_listening_test/mfall/dir5/lpcnq.wav",
+"./resources/quickstart_genspeech/LPCNet_listening_test/vec18/dir5/ref.wav","./resources/quickstart_genspeech/LPCNet_listening_test/vec18/dir5/lpcnq.wav"];
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // A vec of the numbers 0-20
-    let data: Vec<i16> = (0..101).collect();
-    println!("{:?}", data);
-    overlapping_chunks(data, 4, 3);
+fn main() {
+    for _ in 0..100{
+        for file in FILES {
+            let wav = match WavFile::from_file(black_box(Path::new(file))) {
+                Ok(wav) => wav,
+                Err(e) => panic!("Error reading file: {}", e),
+            };
+            let _samples = wav.read(None);
+        }
+    }
 
-    // let test_data = WavFile::new(&Path::new("./test.wav"))?;
-    // // let mut out_file = File::create("out.txt")?;
-    // let data = test_data.read_pcm_i16();
-    // println!("{}", data.len());
-    // // let strings: Vec<String> = test_data.read_pcm_i16()?.iter().map(|n| n.to_string()).collect();
-    // // writeln!(out_file, "{}", strings.join(" "))?;
-    // println!("{:?}", data);
-    Ok(())
 }

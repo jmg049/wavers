@@ -187,16 +187,15 @@ impl WavFile {
         let mut idx = 0;
 
         let iter_step = 2 * n_channels; // two bytes per sample per channel
-        // let mut buf:[u8;2] = [0;2];
+                                        // let mut buf:[u8;2] = [0;2];
 
         for samples in self.data.chunks(iter_step) {
-                unsafe {
-                    for channel_sample in samples.as_chunks_unchecked::<2>() {
-                        channel_data[idx] =
-                            SampleType::I16(i16::from_ne_bytes(*channel_sample));
-                        idx += 1;
-                    }
+            unsafe {
+                for channel_sample in samples.as_chunks_unchecked::<2>() {
+                    channel_data[idx] = SampleType::I16(i16::from_ne_bytes(*channel_sample));
+                    idx += 1;
                 }
+            }
         }
         let out_array: Array2<SampleType> = match Array2::from_shape_vec(
             (channel_data.len() / n_channels, n_channels),
@@ -460,6 +459,12 @@ pub fn signal_info(signal_fp: &Path) -> Result<SignalInfo, std::io::Error> {
                 * fmt_chunk.channels() as i32
                 * (fmt_chunk.bits_per_sample() / 8) as i32) as u64,
     ))
+}
+
+#[inline(always)]
+pub fn read(fp: &Path, as_type: Option<SampleType>) -> Result<Array2<SampleType>, std::io::Error> {
+    let wav_file = WavFile::from_file(fp)?;
+    Ok(wav_file.read(as_type))
 }
 
 ///
@@ -836,41 +841,3 @@ pub fn find_sub_chunk_id(
 fn buf_eq(buf: &[u8; 4], chunk_id: &[u8; 4]) -> bool {
     buf[0] == chunk_id[0] && buf[1] == chunk_id[1] && buf[2] == chunk_id[2] && buf[3] == chunk_id[3]
 }
-
-// pub fn overlapping_chunks<T>(data: Vec<T>, chunk_size: usize, overlap_size: usize) -> Vec<Range<usize>>{
-//     assert!(
-//         chunk_size > overlap_size,
-//         "overlap_size must be less than chunk_size"
-//     );
-//     let n_windows = (data.len() - overlap_size) / (chunk_size - overlap_size);
-//     println!("n_windows: {}", n_windows);
-
-//     let mut ranges: Vec<Range<usize>> = Vec::new();
-
-//     let data_len = data.len();
-//     println!(
-//         "data_len: {} data_len % chunk_size: {}",
-//         data_len,
-//         data_len % chunk_size
-//     );
-//     if data_len % chunk_size == 0 {
-//         for i in (0..data_len).step_by(chunk_size) {
-//             let range = i..(i + chunk_size);
-//             ranges.push(range);
-//         }
-//     } else {
-//         for i in (0..data_len - chunk_size).step_by(chunk_size) {
-//             let range = i..(i + chunk_size);
-//             ranges.push(range);
-//         }
-//         ranges.push((data_len - chunk_size) + 1..data_len);
-//     }
-
-//     println!("{:?}", ranges);
-//     let mut overlapping_ranges: Vec<Range<usize>> = Vec::new();
-//     for i in (overlap_size..(data.len() - chunk_size)).step_by(chunk_size) {
-//         let range = i..(i + chunk_size);
-//         overlapping_ranges.push(range);
-//     }
-//     ranges.iter().interleave(overlapping_ranges)
-// }

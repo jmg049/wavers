@@ -6,8 +6,8 @@ pub mod wave;
 // pub use signal::;
 pub use sample::SampleType;
 pub use wave::{
-    signal_channels, signal_duration, signal_info, signal_sample_rate, write_wav_as, SignalInfo,
-    WavFile,
+    read, signal_channels, signal_duration, signal_info, signal_sample_rate, write_wav_as,
+    SignalInfo, WavFile,
 };
 
 #[cfg(test)]
@@ -17,8 +17,8 @@ mod tests {
     use std::{fs::File, io::BufRead, path::Path, str::FromStr};
 
     use crate::{
-        sample::SampleType, signal_channels, signal_duration, signal_sample_rate, wave::WavFile,
-        write_wav_as, signal_info
+        sample::SampleType, signal_channels, signal_duration, signal_info, signal_sample_rate,
+        wave::WavFile, write_wav_as,
     };
 
     #[test]

@@ -105,7 +105,6 @@ impl PartialEq<f64> for SampleType {
 }
 
 impl SampleType {
-    
     pub fn to_le_bytes(self) -> Vec<u8> {
         match self {
             SampleType::I16(sample) => sample.to_le_bytes().to_vec(),

@@ -2,6 +2,10 @@
 name = "wavers"
 version = "0.1.0"
 edition = "2021"
+authors = ["Jack Geraghty (jmg049)"]
+description = "A Rust crate for reading and writing WAVE files."
+readme = "./README.md"
+keywords =["wave files", "python-bindings"]
 
 [dev-dependencies]
 approx_eq = "0.1.8"

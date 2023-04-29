@@ -1,24 +1,24 @@
 [package]
 name = "wavers"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Jack Geraghty (jmg049)"]
 description = "A Rust crate for reading and writing WAVE files."
 readme = "./README.md"
 exclude = ["resources/*", "tmp_scripts/*", "benches/massif*"]
 license = "MIT"
+repository = "https://github.com/jmg049/wavers/"
+documentation = "https://docs.rs/wavers/"
 
 [dev-dependencies]
 approx_eq = "0.1.8"
 criterion = "0.4.0"
 
 [dependencies]
-itertools = "0.10.5"
 ndarray = "0.15.6"
 num-traits = "0.2.15"
 numpy = "0.18.0"
 pyo3 = "0.18.1"
-rayon = "1.7.0"
 
 [profile.release]
 # debug = true

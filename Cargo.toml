@@ -6,6 +6,7 @@ authors = ["Jack Geraghty (jmg049)"]
 description = "A Rust crate for reading and writing WAVE files."
 readme = "./README.md"
 exclude = ["resources/*", "tmp_scripts/*", "benches/massif*"]
+license = "MIT"
 
 [dev-dependencies]
 approx_eq = "0.1.8"

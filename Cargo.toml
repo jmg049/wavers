@@ -15,7 +15,8 @@ approx_eq = "0.1.8"
 criterion = "0.4.0"
 
 [dependencies]
-ndarray = "0.15.6"
+hound = "3.5.0"
+itertools = "0.10.5"
 num-traits = "0.2.15"
 numpy = "0.18.0"
 pyo3 = "0.18.1"
@@ -26,3 +27,7 @@ panic = "abort"
 
 [profile.profiling]
 inherits = "release"
+
+[[bench]]
+name = "benches"
+harness = false

@@ -3,357 +3,119 @@ mod sample;
 mod signal;
 pub mod wave;
 
-// pub use signal::;
 pub use sample::SampleType;
 pub use wave::{
-    read, signal_channels, signal_duration, signal_info, signal_sample_rate, write_wav_as,
-    SignalInfo, WavFile,
+    signal_channels, signal_duration, signal_info, signal_sample_rate, SignalInfo,
+    WavFile, read, write_wav_as
 };
 
 #[cfg(test)]
 mod tests {
     use approx_eq::assert_approx_eq;
-    use ndarray::Array2;
-    use std::{fs::File, io::BufRead, path::Path, str::FromStr};
+    use std::{fs::{File}, io::BufRead, path::Path, str::FromStr};
 
     use crate::{
         sample::SampleType, signal_channels, signal_duration, signal_info, signal_sample_rate,
         wave::WavFile, write_wav_as,
     };
+    use super::*;
 
     #[test]
-    fn read_one_channel_i16() {
-        let test_file = Path::new("./test_resources/one_channel.wav");
-        let wav_file = match WavFile::from_file(test_file) {
-            Ok(wav_file) => wav_file,
-            Err(err) => {
-                eprintln!("{}", err);
-                return;
-            }
-        };
-        let data_vec: Vec<i16> =
-            read_text_to_vec(Path::new("./test_resources/one_channel_i16.txt")).unwrap();
-        let expected_output: Array2<i16> =
-            Array2::from_shape_vec((data_vec.len(), 1), data_vec).unwrap();
-        let i16_data = wav_file.read(None);
+    fn can_read_one_channel_i16() {
+        let fp = Path::new("./test_resources/one_channel.wav");
+        let signal = read(fp, Some(SampleType::I16(0))).expect("Failed to read wav file");
 
-        let mut idx = 0;
-        for (expected, actual) in std::iter::zip(expected_output, i16_data) {
-            assert_eq!(
-                actual, expected,
-                "Expected {} - Actual {}\nFailed at index {}",
-                expected, actual, idx
-            );
-            idx += 1;
+        let expected_signal = read_text_to_vec::<i16>(Path::new("./test_resources/one_channel_i16.txt")).expect("Failed to read expected signal").iter().map(|s| SampleType::I16(*s)).collect::<Vec<SampleType>>();
+        for (expected, actual) in std::iter::zip(expected_signal, signal) {
+            assert_eq!(expected, actual);
         }
     }
 
     #[test]
-    fn read_invalid_file() {
-        let signal_fp = Path::new("./test_resources/invalid.wav");
-        let wav_file = WavFile::from_file(signal_fp);
-        assert!(wav_file.is_err());
-    }
+    fn can_read_two_channel_i16() {
+        let fp = Path::new("./test_resources/two_channel.wav");
+        let signal = read(fp, Some(SampleType::I16(0))).expect("Failed to read wav file");
 
-    #[test]
-    fn read_write_one_channel_i16() {
-        let test_file = Path::new("./test_resources/one_channel.wav");
-        let wav_file = match WavFile::from_file(test_file) {
-            Ok(wav_file) => wav_file,
-            Err(err) => {
-                eprintln!("{}", err);
-                return;
-            }
-        };
-        let data_vec: Vec<i16> =
-            read_text_to_vec(Path::new("./test_resources/one_channel_i16.txt")).unwrap();
-        let _expected_output: Array2<i16> =
-            Array2::from_shape_vec((data_vec.len(), 1), data_vec).unwrap();
-        let i16_data = wav_file.read(None);
-        write_wav_as(
-            Path::new("./test_resources/write_one_channel_i16.wav"),
-            &i16_data,
-            None,
-            16000,
-        )
-        .unwrap();
-
-        let test_wav_file =
-            match WavFile::from_file(Path::new("./test_resources/write_one_channel_i16.wav")) {
-                Ok(wav_file) => wav_file,
-                Err(err) => {
-                    eprintln!("{}", err);
-                    return;
-                }
-            };
-
-        let test_i16_data = test_wav_file.read(None);
-
-        let mut idx = 0;
-        for (expected, actual) in std::iter::zip(test_i16_data, i16_data) {
-            assert_eq!(
-                actual, expected,
-                "Expected {} - Actual {}\nFailed at index {}",
-                expected, actual, idx
-            );
-            idx += 1;
+        let expected_signal = read_text_to_vec::<i16>(Path::new("./test_resources/two_channel_i16.txt")).expect("Failed to read expected signal").iter().map(|s| SampleType::I16(*s)).collect::<Vec<SampleType>>();
+        for (expected, actual) in std::iter::zip(expected_signal, signal) {
+            assert_eq!(expected, actual);
         }
     }
 
     #[test]
-    fn read_one_channel_f32() {
-        let test_file = Path::new("./test_resources/one_channel.wav");
-        let wav_file = match WavFile::from_file(test_file) {
-            Ok(wav_file) => wav_file,
-            Err(err) => {
-                eprintln!("{}", err);
-                return;
-            }
-        };
-        let data_vec: Vec<f32> =
-            read_text_to_vec(Path::new("./test_resources/one_channel_f32.txt")).unwrap();
-        let expected_output: Array2<f32> =
-            Array2::from_shape_vec((data_vec.len(), 1), data_vec).unwrap();
-        let f32_data = wav_file.read(Some(SampleType::F32(0.0)));
+    fn can_read_one_channel_i16_as_f32() {
+        let fp = Path::new("./test_resources/one_channel.wav");
+        let signal = read(fp, Some(SampleType::F32(0.0))).expect("Failed to read wav file");
 
-        let mut _idx = 0;
-        for (expected, actual) in std::iter::zip(expected_output, f32_data) {
-            let sample: f64 = match actual {
-                SampleType::F32(f) => f as f64,
-                _ => panic!("Expected F32"),
-            };
-            assert_approx_eq!(expected as f64, sample, 0.0001);
-            _idx += 1;
+        let expected_signal = read_text_to_vec::<f32>(Path::new("./test_resources/one_channel_f32.txt")).expect("Failed to read expected signal").iter().map(|s| SampleType::F32(*s)).collect::<Vec<SampleType>>();
+        for (expected, actual) in std::iter::zip(expected_signal, signal) {
+            assert_approx_eq!(expected.to_f64(), actual.to_f64(), 1e-4);
         }
     }
 
     #[test]
-    fn read_write_one_channel_f32() {
-        let test_file = Path::new("./test_resources/one_channel.wav");
-        let wav_file = match WavFile::from_file(test_file) {
-            Ok(wav_file) => wav_file,
-            Err(err) => {
-                eprintln!("{}", err);
-                return;
-            }
-        };
-        let f32_data = wav_file.read(Some(SampleType::F32(0.0)));
-        write_wav_as(
-            Path::new("./test_resources/write_one_channel_f32.wav"),
-            &f32_data,
-            Some(SampleType::F32(0.0)),
-            16000,
-        )
-        .unwrap();
+    fn can_read_two_channel_i16_as_f32() {
+        let fp = Path::new("./test_resources/two_channel.wav");
+        let signal = read(fp, Some(SampleType::F32(0.0))).expect("Failed to read wav file");
 
-        let test_wav_file =
-            match WavFile::from_file(Path::new("./test_resources/write_one_channel_f32.wav")) {
-                Ok(wav_file) => wav_file,
-                Err(err) => {
-                    eprintln!("{}", err);
-                    return;
-                }
-            };
-        assert_eq!(
-            10,
-            signal_duration(Path::new("./test_resources/write_one_channel_f32.wav")).unwrap(),
-            "Duration of written file does not match, expected 10 seconds"
-        );
-        assert_eq!(
-            1,
-            signal_channels(Path::new("./test_resources/write_one_channel_f32.wav")).unwrap(),
-            "Number of channels of written file does not match, expected 1"
-        );
-        assert_eq!(
-            16000,
-            signal_sample_rate(Path::new("./test_resources/write_one_channel_f32.wav")).unwrap(),
-            "Sample rate of written file does not match, expected 16000"
-        );
-        let test_f32_data = test_wav_file.read(Some(SampleType::F32(0.0)));
-
-        let mut _idx = 0;
-        for (_expected, actual) in std::iter::zip(test_f32_data, f32_data) {
-            let expected_sample: f64 = match actual {
-                SampleType::F32(f) => f as f64,
-                _ => panic!("Expected F32"),
-            };
-
-            let actual_sample: f64 = match actual {
-                SampleType::F32(f) => f as f64,
-                _ => panic!("Expected F32"),
-            };
-            assert_approx_eq!(expected_sample, actual_sample, 0.0001);
-            _idx += 1;
+        let expected_signal = read_text_to_vec::<f32>(Path::new("./test_resources/two_channel_f32.txt")).expect("Failed to read expected signal").iter().map(|s| SampleType::F32(*s)).collect::<Vec<SampleType>>();
+        for (expected, actual) in std::iter::zip(expected_signal, signal) {
+            assert_approx_eq!(expected.to_f64(), actual.to_f64(), 1e-4);
         }
     }
 
     #[test]
-    fn read_two_channel_i16() {
-        let test_file = Path::new("./test_resources/two_channel.wav");
-        let wav_file = match WavFile::from_file(test_file) {
-            Ok(wav_file) => wav_file,
-            Err(err) => {
-                eprintln!("{}", err);
-                return;
-            }
-        };
-        let data_vec: Vec<i16> =
-            read_text_to_vec(Path::new("./test_resources/two_channel_i16.txt")).unwrap();
-        let expected_output: Array2<i16> =
-            Array2::from_shape_vec((data_vec.len() / 2, 2), data_vec).unwrap();
-        let i16_data = wav_file.read(None);
+    fn can_write_one_channel_i16() {
+        let fp = Path::new("./test_resources/one_channel.wav");
+        let signal = read(fp, Some(SampleType::I16(0))).expect("Failed to read wav file");
 
-        let mut idx = 0;
-        for (expected, actual) in std::iter::zip(expected_output, i16_data) {
-            assert_eq!(
-                actual, expected,
-                "Expected {} - Actual {}\nFailed at index {}",
-                expected, actual, idx
-            );
-            idx += 1;
+        let mut output_fp = Path::new("./test_resources/one_channel_out.wav");
+
+        write_wav_as(&mut output_fp, &signal, Some(SampleType::I16(0)), 1, 16000).expect("Failed to write wav file");
+
+        let output_signal = read(output_fp, Some(SampleType::I16(0))).expect("Failed to read output wav file");
+        assert_eq!(signal, output_signal);
+
+    }
+
+
+    #[test]
+    fn can_write_one_channel_f32() {
+        let fp = Path::new("./test_resources/one_channel.wav");
+        let signal = read(fp, Some(SampleType::I16(0))).expect("Failed to read wav file");
+
+        let mut output_fp = Path::new("./test_resources/one_channel_out.wav");
+        if output_fp.exists() {
+            std::fs::remove_file(output_fp).expect("Failed to remove output file");
         }
+        write_wav_as(&mut output_fp, &signal, Some(SampleType::F32(0.0)), 1, 16000).expect("Failed to write wav file");
+
+        let output_signal = match read(output_fp, Some(SampleType::F32(0.0))) {
+            Ok(s) => s,
+            Err(e) => panic!("Failed to read output wav file: {}", e)
+        };
+
+        assert_eq!(signal.iter().map(|sample| sample.to_f32()).collect::<Vec<_>>(), output_signal.iter().map(|sample| sample.to_f32()).collect::<Vec<_>>());
     }
 
     #[test]
-    fn read_write_two_channel_i16() {
-        let test_file = Path::new("./test_resources/two_channel.wav");
-        let wav_file = match WavFile::from_file(test_file) {
-            Ok(wav_file) => wav_file,
-            Err(err) => {
-                eprintln!("{}", err);
-                return;
-            }
-        };
-        let i16_data = wav_file.read(None);
-        write_wav_as(
-            Path::new("./test_resources/write_two_channel_i16.wav"),
-            &i16_data,
-            None,
-            16000,
-        )
-        .unwrap();
+    fn can_write_two_channel_i16() {
+        let fp = Path::new("./test_resources/two_channel.wav");
+        let signal = read(fp, Some(SampleType::I16(0))).expect("Failed to read wav file");
 
-        let test_wav_file =
-            match WavFile::from_file(Path::new("./test_resources/write_two_channel_i16.wav")) {
-                Ok(wav_file) => wav_file,
-                Err(err) => {
-                    eprintln!("{}", err);
-                    return;
-                }
-            };
-        assert_eq!(
-            10,
-            signal_duration(Path::new("./test_resources/write_two_channel_i16.wav")).unwrap(),
-            "Duration of written file does not match, expected 10 seconds"
-        );
-        assert_eq!(
-            2,
-            signal_channels(Path::new("./test_resources/write_two_channel_i16.wav")).unwrap(),
-            "Number of channels of written file does not match, expected 2"
-        );
-        assert_eq!(
-            16000,
-            signal_sample_rate(Path::new("./test_resources/write_two_channel_i16.wav")).unwrap(),
-            "Sample rate of written file does not match, expected 16000"
-        );
-        let test_i16_data = test_wav_file.read(None);
-
-        let mut idx = 0;
-        for (expected, actual) in std::iter::zip(test_i16_data, i16_data) {
-            assert_eq!(
-                actual, expected,
-                "Expected {} - Actual {}\nFailed at index {}",
-                expected, actual, idx
-            );
-            idx += 1;
+        let mut output_fp = Path::new("./test_resources/two_channel_out.wav");
+        if output_fp.exists() {
+            std::fs::remove_file(output_fp).expect("Failed to remove output file");
         }
-    }
+        write_wav_as(&mut output_fp, &signal, Some(SampleType::I16(0)), 2, 16000).expect("Failed to write wav file");
 
-    #[test]
-    fn read_two_channel_f32() {
-        let test_file = Path::new("./test_resources/two_channel.wav");
-        let wav_file = match WavFile::from_file(test_file) {
-            Ok(wav_file) => wav_file,
-            Err(err) => {
-                eprintln!("{}", err);
-                return;
-            }
+        let output_signal = match read(output_fp, Some(SampleType::F32(0.0))) {
+            Ok(s) => s,
+            Err(e) => panic!("Failed to read output wav file: {}", e)
         };
-        let data_vec: Vec<f32> =
-            read_text_to_vec(Path::new("./test_resources/two_channel_f32.txt")).unwrap();
-        let expected_output: Array2<f32> =
-            Array2::from_shape_vec((data_vec.len() / 2, 2), data_vec).unwrap();
-        let f32_data = wav_file.read(Some(SampleType::F32(0.0)));
 
-        let mut _idx = 0;
-        for (expected, actual) in std::iter::zip(expected_output, f32_data) {
-            let sample: f64 = match actual {
-                SampleType::F32(f) => f as f64,
-                _ => panic!("Expected F32"),
-            };
-            assert_approx_eq!(expected as f64, sample, 0.0001);
-            _idx += 1;
-        }
-    }
+        assert_eq!(signal.iter().map(|sample| sample.to_f32()).collect::<Vec<_>>(), output_signal.iter().map(|sample| sample.to_f32()).collect::<Vec<_>>());
 
-    #[test]
-    fn read_write_two_channel_f32() {
-        let test_file = Path::new("./test_resources/two_channel.wav");
-        let wav_file = match WavFile::from_file(test_file) {
-            Ok(wav_file) => wav_file,
-            Err(err) => {
-                eprintln!("{}", err);
-                return;
-            }
-        };
-        let f32_data = wav_file.read(Some(SampleType::F32(0.0)));
-        write_wav_as(
-            Path::new("./test_resources/write_two_channel_f32.wav"),
-            &f32_data,
-            Some(SampleType::F32(0.0)),
-            16000,
-        )
-        .unwrap();
-
-        let test_wav_file =
-            match WavFile::from_file(Path::new("./test_resources/write_two_channel_f32.wav")) {
-                Ok(wav_file) => wav_file,
-                Err(err) => {
-                    eprintln!("{}", err);
-                    return;
-                }
-            };
-        assert_eq!(
-            10,
-            signal_duration(Path::new("./test_resources/write_two_channel_f32.wav")).unwrap(),
-            "Duration of written file does not match, expected 10 seconds"
-        );
-        assert_eq!(
-            2,
-            signal_channels(Path::new("./test_resources/write_two_channel_f32.wav")).unwrap(),
-            "Number of channels of written file does not match, expected 2"
-        );
-        assert_eq!(
-            16000,
-            signal_sample_rate(Path::new("./test_resources/write_two_channel_f32.wav")).unwrap(),
-            "Sample rate of written file does not match, expected 16000"
-        );
-        let test_f32_data = test_wav_file.read(Some(SampleType::F32(0.0)));
-
-        let mut _idx = 0;
-        for (expected, actual) in std::iter::zip(test_f32_data, f32_data) {
-            let expected_sample: f64 = match expected {
-                SampleType::F32(f) => f as f64,
-                _ => panic!("Expected F32"),
-            };
-
-            let actual_sample: f64 = match actual {
-                SampleType::F32(f) => f as f64,
-                _ => panic!("Expected F32"),
-            };
-            assert_approx_eq!(expected_sample, actual_sample, 0.0001);
-            _idx += 1;
-        }
     }
 
     #[test]

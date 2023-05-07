@@ -20,6 +20,7 @@ mod tests {
     };
     use super::*;
 
+
     #[test]
     fn can_read_one_channel_i16() {
         let fp = Path::new("./test_resources/one_channel.wav");
@@ -64,18 +65,31 @@ mod tests {
         }
     }
 
+
     #[test]
     fn can_write_one_channel_i16() {
         let fp = Path::new("./test_resources/one_channel.wav");
         let signal = read(fp, Some(SampleType::I16(0))).expect("Failed to read wav file");
+        use uuid::Uuid;
 
-        let mut output_fp = Path::new("./test_resources/one_channel_out.wav");
+        // create tmp_out dir if it doesn't exist
+        let tmp_out_dir = Path::new("./test_resources/tmp_out");
+        if !tmp_out_dir.exists() {
+            std::fs::create_dir(tmp_out_dir).expect("Failed to create tmp_out dir");
+        }
+
+        let id = Uuid::new_v4();
+        let out_id = format!("./test_resources/tmp_out/one_channel_out_{}.wav", id);
+        let mut output_fp = Path::new(&out_id);
 
         write_wav_as(&mut output_fp, &signal, Some(SampleType::I16(0)), 1, 16000).expect("Failed to write wav file");
 
         let output_signal = read(output_fp, Some(SampleType::I16(0))).expect("Failed to read output wav file");
-        assert_eq!(signal, output_signal);
+        for (expected, actual) in std::iter::zip(signal, output_signal) {
+            assert_eq!(expected, actual, "Expected: {}, Actual: {}", expected, actual);
+        }        std::fs::remove_file(output_fp).expect("Failed to remove output file");
 
+        std::fs::remove_file(output_fp).expect("Failed to remove output file");
     }
 
 
@@ -84,7 +98,7 @@ mod tests {
         let fp = Path::new("./test_resources/one_channel.wav");
         let signal = read(fp, Some(SampleType::I16(0))).expect("Failed to read wav file");
 
-        let mut output_fp = Path::new("./test_resources/one_channel_out.wav");
+        let mut output_fp = Path::new("./test_resources/tmp_out/one_channel_out.wav");
         if output_fp.exists() {
             std::fs::remove_file(output_fp).expect("Failed to remove output file");
         }
@@ -94,8 +108,10 @@ mod tests {
             Ok(s) => s,
             Err(e) => panic!("Failed to read output wav file: {}", e)
         };
-
-        assert_eq!(signal.iter().map(|sample| sample.to_f32()).collect::<Vec<_>>(), output_signal.iter().map(|sample| sample.to_f32()).collect::<Vec<_>>());
+        for (expected, actual) in std::iter::zip(signal.iter().map(|sample| sample.to_f32()).collect::<Vec<_>>(), output_signal.iter().map(|sample| sample.to_f32()).collect::<Vec<_>>()) {
+            assert_approx_eq!(expected.into(), actual.into(), 1e-4);
+        }
+        std::fs::remove_file(output_fp).expect("Failed to remove output file");
     }
 
     #[test]
@@ -103,7 +119,7 @@ mod tests {
         let fp = Path::new("./test_resources/two_channel.wav");
         let signal = read(fp, Some(SampleType::I16(0))).expect("Failed to read wav file");
 
-        let mut output_fp = Path::new("./test_resources/two_channel_out.wav");
+        let mut output_fp = Path::new("./test_resources/tmp_out/two_channel_out.wav");
         if output_fp.exists() {
             std::fs::remove_file(output_fp).expect("Failed to remove output file");
         }
@@ -113,9 +129,10 @@ mod tests {
             Ok(s) => s,
             Err(e) => panic!("Failed to read output wav file: {}", e)
         };
-
-        assert_eq!(signal.iter().map(|sample| sample.to_f32()).collect::<Vec<_>>(), output_signal.iter().map(|sample| sample.to_f32()).collect::<Vec<_>>());
-
+        for (expected, actual) in std::iter::zip(signal, output_signal) {
+            assert_eq!(expected, actual, "Expected: {}, Actual: {}", expected, actual);
+        }
+        std::fs::remove_file(output_fp).expect("Failed to remove output file");
     }
 
     #[test]

@@ -1,3 +1,5 @@
+
+
 ///
 /// A SampleType is a type that can be used to represent a single sample. Allows for the passing of samples in a generic way,
 /// while also allowing for the conversion between different sample types.
@@ -45,6 +47,16 @@ impl SampleType {
             SampleType::I32(sample) => sample.convert_to_f64(),
             SampleType::F32(sample) => sample.convert_to_f64(),
             SampleType::F64(sample) => *sample,
+        }
+    }
+
+    #[inline(always)]
+    pub fn size_of_underlying(&self) -> usize {
+        match self {
+            SampleType::I16(_) => std::mem::size_of::<i16>(),
+            SampleType::I32(_) => std::mem::size_of::<i32>(),
+            SampleType::F32(_) => std::mem::size_of::<f32>(),
+            SampleType::F64(_) => std::mem::size_of::<f64>(),
         }
     }
 }
@@ -112,6 +124,15 @@ impl SampleType {
             SampleType::I32(sample) => sample.to_le_bytes().to_vec(),
             SampleType::F32(sample) => sample.to_le_bytes().to_vec(),
             SampleType::F64(sample) => sample.to_le_bytes().to_vec(),
+        }
+    }
+
+    pub fn to_ne_bytes(self) -> Vec<u8> {
+        match self {
+            SampleType::I16(sample) => sample.to_ne_bytes().to_vec(),
+            SampleType::I32(sample) => sample.to_ne_bytes().to_vec(),
+            SampleType::F32(sample) => sample.to_ne_bytes().to_vec(),
+            SampleType::F64(sample) => sample.to_ne_bytes().to_vec(),
         }
     }
 

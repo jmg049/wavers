@@ -1,7 +1,10 @@
 [package]
 name = "wavers"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+
+[features]
+ndarray = ["dep:ndarray"]
 
 [dev-dependencies]
 approx_eq = "0.1.8"
@@ -10,11 +13,10 @@ uuid = { version = "1.3.0", features = ["v4","fast-rng"] }
 
 [dependencies]
 hound = "3.5.0"
-itertools = "0.10.5"
 num-traits = "0.2.15"
 numpy = "0.18.0"
 pyo3 = "0.18.1"
-rayon = "1.7.0"
+ndarray = {version="0.15.4", optional = true}
 
 [profile.release]
 panic = "abort"

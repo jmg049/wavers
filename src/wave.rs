@@ -21,12 +21,28 @@ const LIST: &[u8; 4] = b"LIST";
 ///
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WavFile {
+    /// 
+    /// The format chunk of the wav file. This contains the sample rate, number of channels, and the encoding of the samples. See the ``FmtChunk`` struct for more details.
+    /// 
     pub fmt_chunk: FmtChunk,
+    ///
+    /// The actual wave data. This is a boxed slice of ``u8``. The data is not converted to a concrete type until it is read.
+    /// 
     pub data: Box<[u8]>,
+
+    ///
+    /// The position of the data chunk in the file. This is used to seek to the data chunk when reading the file.
+    /// 
     pub seek_pos: u64,
 }
 
 impl WavFile {
+
+    /// 
+    /// Create a new ``WavFile`` from a ``FmtChunk``, a boxed slice of ``u8`` and the position of the data chunk in the file.
+    /// 
+    /// Returns a ``WavFile``.
+    /// 
     pub fn new(fmt_chunk: FmtChunk, data: Box<[u8]>, seek_pos: u64) -> WavFile {
         WavFile {
             fmt_chunk,
@@ -39,8 +55,18 @@ impl WavFile {
     /// Read a file from disk and return a ``WavFile``
     ///
     /// Returns a ``WavFile`` if the file is successfully read. Otherwise, returns an ``std::io::Error``.
+    /// 
+    /// # Examples
+    /// ```rust
+    /// use wavers::WavFile;
+    /// use std::path::Path;
+    /// 
+    /// fn main() {
+    ///     let wav_file = WavFile::from_file(Path::new("path/to/file.wav")).expect("Error reading file");
+    ///     println!("Sample rate: {}", wav_file.sample_rate());
+    /// }
+    /// ```
     ///
-
     pub fn from_file(fp: &Path) -> Result<WavFile, std::io::Error> {
         let file = File::open(fp)?;
         let mut buf_reader = std::io::BufReader::new(file);
@@ -60,11 +86,12 @@ impl WavFile {
         Ok(WavFile::new(fmt_chunk, data, 0))
     }
 
+    ///
     /// Read the underlying wave data into the desired sample type. If no sample type is given, the original sample type will be used.
-    /// This funcions converts the underlying ``u8`` buffer to a concrete type ndarray.
+    /// This funcions converts the underlying ``u8`` buffer to a vector of Samples.
     ///
-    /// Returns a ndarray with the shape (n_samples, n_channels)
-    ///
+    /// Returns a ``Vec<Sample>``.
+    /// 
     /// Panics if the sample type is not supported.
     ///
     #[inline]
@@ -111,15 +138,26 @@ impl WavFile {
     ///
     /// Will write the wave file data to the given path. If the file already exists, it will be overwritten.
     /// Writes the current state of the ``WavFile``, which may be different from the original file if it was read by ``wavers`` as only
-    /// the ``FMT`` and ``Data`` chunks of the orignal wav file are presevered. The ``RIFF`` chunk is recreated and the length of the file is
+    /// the ``FMT `` and ``Data`` chunks of the orignal wav file are presevered. The ``RIFF`` chunk is recreated and the length of the file is
     /// recalculated. Any modification of the wav data will be be written provided that the original format is preserved.
     ///
-    /// To write a different type of sample, use the function write_wav_as and pass in the desired sample type.
+    /// To write a different type of sample, use the function ``wavers::write`` and pass in the desired sample type.
+    /// 
     /// Returns an error if the file cannot be created or written to.
     ///
-    ///
-
-    pub fn write_wav(&self, fp: &Path) -> Result<(), std::io::Error> {
+    /// ## Examples
+    /// 
+    /// ```rust
+    /// use wavers::WavFile;
+    /// use std::path::Path;
+    /// 
+    /// fn main() {
+    ///     let wav_file = WavFile::from_file(Path::new("path/to/file.wav")).expect("Error reading file");
+    ///     wav_file.write(Path::new("path/to/new_file.wav")).expect("Error writing file");
+    /// }
+    /// ```
+    /// 
+    pub fn write(&self, fp: &Path) -> Result<(), std::io::Error> {
         let file = File::create(fp)?;
         let mut buf_writer = BufWriter::new(file);
 
@@ -143,6 +181,8 @@ impl WavFile {
     ///
     /// Reads the underlying wav data as 16-bit signed integer PCM samples.
     ///
+    /// Returns a ``Vec<Sample>`` which contains the **interleaved** channel samples.
+    /// 
     /// Panics if there is an error reading the data. Will likely change this to return a result in future.
     ///
     #[inline]
@@ -173,9 +213,10 @@ impl WavFile {
     ///
     /// Reads the underlying wav data as 32-bit signed integer PCM samples.
     ///
+    /// Returns a ``Vec<Sample>`` which contains the **interleaved** channel samples.
+    /// 
     /// Panics if there is an error reading the data. Will likely change this to return a result in future.
     ///
-
     fn read_pcm_i32(&self) -> Vec<Sample> {
         let n_channels = self.fmt_chunk.channels as usize;
         let mut channel_data: Vec<Sample> =
@@ -203,9 +244,10 @@ impl WavFile {
     ///
     /// Reads the underlying wav data as 32-bit IEEE floating point PCM samples.
     ///
+    /// Returns a ``Vec<Sample>`` which contains the **interleaved** channel samples.
+    /// 
     /// Panics if there is an error reading the data. Will likely change this to return a result in future.
     ///
-
     fn read_ieee_f32(&self) -> Vec<Sample> {
         let n_channels = self.fmt_chunk.channels as usize;
         let mut channel_data: Vec<Sample> =
@@ -233,9 +275,10 @@ impl WavFile {
     ///
     /// Reads the underlying wav data as 64-bit IEEE floating point PCM samples.
     ///
+    /// Returns a ``Vec<Sample>`` which contains the **interleaved** channel samples.
+    /// 
     /// Panics if there is an error reading the data. Will likely change this to return a result in future.
     ///
-
     fn read_ieee_f64(&self) -> Vec<Sample> {
         let n_channels = self.fmt_chunk.channels as usize;
         let mut channel_data: Vec<Sample> =
@@ -264,7 +307,6 @@ impl WavFile {
     ///
     /// Calculates the duration of the wav file in seconds using the ``WavFile`` data that is already loaded.
     ///
-
     pub fn duration(&self) -> u64 {
         self.data_size() as u64
             / (self.sample_rate() * self.channels() as i32 * (self.bits_per_sample() / 8) as i32)
@@ -309,7 +351,6 @@ impl WavFile {
 ///
 /// Returns an error if the file is not a valid wav file or does not exist.
 ///  
-
 pub fn signal_duration(signal_fp: &Path) -> Result<u64, std::io::Error> {
     let wav_file = File::open(signal_fp)?;
     let mut br = BufReader::new(wav_file);
@@ -331,7 +372,6 @@ pub fn signal_duration(signal_fp: &Path) -> Result<u64, std::io::Error> {
 ///
 /// Returns an error if the file is not a valid wav file or does not exist.
 ///
-
 pub fn signal_sample_rate(signal_fp: &Path) -> Result<i32, std::io::Error> {
     let wav_file = File::open(signal_fp)?;
     let mut br = BufReader::new(wav_file);
@@ -344,7 +384,6 @@ pub fn signal_sample_rate(signal_fp: &Path) -> Result<i32, std::io::Error> {
 ///
 /// Returns an error if the file is not a valid wav file or does not exist.
 ///
-
 pub fn signal_channels(signal_fp: &Path) -> Result<u16, std::io::Error> {
     let wav_file = File::open(signal_fp)?;
     let mut br = BufReader::new(wav_file);
@@ -352,6 +391,9 @@ pub fn signal_channels(signal_fp: &Path) -> Result<u16, std::io::Error> {
     Ok(fmt_chunk.channels())
 }
 
+///
+/// A struct containing information about a wav file. This data is read from the header of the wav file. Usefuly if you want to know the properties of a wav file without reading the entire file.
+/// 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SignalInfo {
     pub sample_rate: i32,
@@ -361,6 +403,10 @@ pub struct SignalInfo {
 }
 
 impl SignalInfo {
+
+    ///
+    /// Creates a new ``SignalInfo`` struct.
+    /// 
     pub fn new(sample_rate: i32, channels: u16, bits_per_sample: u16, duration: u64) -> Self {
         Self {
             sample_rate,
@@ -371,6 +417,11 @@ impl SignalInfo {
     }
 }
 
+///
+/// Returns a ``SignalInfo`` struct containing information about a wav file without reading the entire file, only the necessary header information.
+/// 
+/// Returns an error if the file is not a valid wav file or does not exist.
+/// 
 pub fn signal_info(signal_fp: &Path) -> Result<SignalInfo, std::io::Error> {
     let wav_file = File::open(signal_fp)?;
     let mut br = BufReader::new(wav_file);
@@ -391,6 +442,25 @@ pub fn signal_info(signal_fp: &Path) -> Result<SignalInfo, std::io::Error> {
                 * (fmt_chunk.bits_per_sample() / 8) as i32) as u64,
     ))
 }
+
+///
+/// **Important function**: Reads a wav file into a vector of samples. This function reads the entire file into memory.
+/// Using this function allows you to read a wav file into a vector of samples without having to worry about the wav file's header information or holding onto the other wav file details.
+/// 
+/// Also allows for specifying the type of the samples in the wav file. If the type is not specified, the type of the samples will be the same as the type of the samples in the wav file.
+/// 
+/// Returns an error if the file is not a valid wav file or does not exist.
+/// 
+/// # Example
+/// ```rust
+/// use wavers::read;
+/// use std::path::Path;
+/// 
+/// fn main() {
+///     let signal_fp = Path::new("signal.wav");
+///     let signal = read(signal_fp, None).expect("Failed to read signal");
+/// }
+/// ```
 #[inline]
 pub fn read(fp: &Path, as_type: Option<Sample>) -> Result<Vec<Sample>, std::io::Error> {
     let wav_file = WavFile::from_file(fp)?;
@@ -398,13 +468,26 @@ pub fn read(fp: &Path, as_type: Option<Sample>) -> Result<Vec<Sample>, std::io::
 }
 
 ///
-/// Write a wav array to a file with the given sample rate and as the given type if provided.
+/// Write a ``Vec<Sample>`` to a file with the given sample rate, number of channels and as the given type if provided.
 /// This function does not preserve the original file's header information. Only the RIFF, WAVE, FMT and DATA chunks are written.
 ///
 /// Returns an error if the file cannot be created or if it cannot write to the file.
+/// 
+/// # Example
+/// ```rust
+/// use std::path::Path;
+/// use wavers::{write, Sample};
+/// 
+/// fn main() {
+///     let mut samples = (0..16000).map(|x| Sample::I16(x)).collect();
+///     let signal_fp = Path::new("signal.wav");
+/// 
+///     // write i16 samples as f32 samples
+///     write(signal_fp, &mut samples, Some(Sample::F32(0.0)), 1, 16000).expect("Failed to write signal");
+/// }
+/// ```
 ///
-
-pub fn write_wav_as(
+pub fn write(
     fp: &Path,
     data: &mut Vec<Sample>,
     as_type: Option<Sample>,
@@ -479,8 +562,7 @@ pub fn write_wav_as(
 ///
 /// Panics if the buffer cannot be allocated.
 ///
-
-pub fn alloc_box_buffer(len: usize) -> Box<[u8]> {
+fn alloc_box_buffer(len: usize) -> Box<[u8]> {
     if len == 0 {
         return <Box<[u8]>>::default();
     }
@@ -503,12 +585,19 @@ pub fn alloc_box_buffer(len: usize) -> Box<[u8]> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub struct FmtChunk {
+    /// Size of the chunk in bytes. Constant value of 16.
     pub size: i32,
+    /// Format of the audio data. 1 for PCM, 3 for IEEE float.
     pub format: u16,
+    /// Number of channels in the audio data.
     pub channels: u16,
+    /// Sample rate of the audio data.
     pub sample_rate: i32,
+    /// Byte rate of the audio data.
     pub byte_rate: i32,
+    /// Block align of the audio data.
     pub block_align: u16,
+    /// Bits per sample of the audio data.
     pub bits_per_sample: u16,
 }
 
@@ -612,56 +701,36 @@ impl FmtChunk {
 
     ///
     /// Get the number of bytes per sample.
-    ///
-
     pub fn get_sample_size(&self) -> usize {
         self.bits_per_sample as usize / 8
     }
 
-    ///
     /// Get the wave file data format.
-    ///
-
     pub fn format(&self) -> u16 {
         self.format
     }
 
-    ///
     /// Get the number of channels.
-    ///
-
     pub fn channels(&self) -> u16 {
         self.channels
     }
 
-    ///
     /// Get the sample rate.
-    ///
-
     pub fn sample_rate(&self) -> i32 {
         self.sample_rate
     }
 
-    ///
     /// Get the byte rate.
-    ///
-
     pub fn byte_rate(&self) -> i32 {
         self.byte_rate
     }
 
-    ///
     /// Get the block align.
-    ///
-
     pub fn block_align(&self) -> u16 {
         self.block_align
     }
 
-    ///
     /// Get the number of bits per sample.
-    ///
-
     pub fn bits_per_sample(&self) -> u16 {
         self.bits_per_sample
     }
@@ -675,7 +744,7 @@ impl FmtChunk {
 /// Returns an error if the sub-chunk id cannot be found.
 ///
 
-pub fn find_sub_chunk_id(
+fn find_sub_chunk_id(
     file: &mut BufReader<File>,
     chunk_id: &[u8; 4],
 ) -> Result<(usize, usize), std::io::Error> {
@@ -736,10 +805,7 @@ pub fn find_sub_chunk_id(
     ))
 }
 
-///
 /// Function to compare two 4-byte arrays for equality.
-///
-
 fn buf_eq(buf: &[u8; 4], chunk_id: &[u8; 4]) -> bool {
     buf[0] == chunk_id[0] && buf[1] == chunk_id[1] && buf[2] == chunk_id[2] && buf[3] == chunk_id[3]
 }
@@ -747,6 +813,7 @@ fn buf_eq(buf: &[u8; 4], chunk_id: &[u8; 4]) -> bool {
 #[cfg(feature = "ndarray")]
 use ndarray::{Array2, ShapeError};
 
+/// Trait which enables the conversion of a Vec<T> to an Array2<T>.
 #[cfg(feature = "ndarray")]
 pub trait IntoArray<T> {
     fn into_array(self, n_channels: usize) -> Result<Array2<T>, ShapeError>;
@@ -754,6 +821,7 @@ pub trait IntoArray<T> {
 
 #[cfg(feature = "ndarray")]
 impl IntoArray<Sample> for Vec<Sample> {
+    /// Converts a Vec<Sample> to an Array2<Sample>, array shape is derived from the number of channels
     fn into_array(self, n_channels: usize) -> Result<Array2<Sample>, ShapeError> {
         Array2::from_shape_vec((self.len() / n_channels, n_channels), self)
     }
@@ -761,6 +829,7 @@ impl IntoArray<Sample> for Vec<Sample> {
 
 #[cfg(feature = "ndarray")]
 impl IntoArray<i16> for Vec<i16> {
+    /// Converts a Vec<i16> to an Array2<i16>, array shape is derived from the number of channels
     fn into_array(self, n_channels: usize) -> Result<Array2<i16>, ShapeError> {
         Array2::from_shape_vec((self.len() / n_channels, n_channels), self)
     }
@@ -768,6 +837,7 @@ impl IntoArray<i16> for Vec<i16> {
 
 #[cfg(feature = "ndarray")]
 impl IntoArray<i32> for Vec<i32> {
+    /// Converts a Vec<i32> to an Array2<i32>, array shape is derived from the number of channels
     fn into_array(self, n_channels: usize) -> Result<Array2<i32>, ShapeError> {
         Array2::from_shape_vec((self.len() / n_channels, n_channels), self)
     }
@@ -775,6 +845,7 @@ impl IntoArray<i32> for Vec<i32> {
 
 #[cfg(feature = "ndarray")]
 impl IntoArray<f32> for Vec<f32> {
+    /// Converts a Vec<f32> to an Array2<f32>, array shape is derived from the number of channels
     fn into_array(self, n_channels: usize) -> Result<Array2<f32>, ShapeError> {
         Array2::from_shape_vec((self.len() / n_channels, n_channels), self)
     }
@@ -782,6 +853,7 @@ impl IntoArray<f32> for Vec<f32> {
 
 #[cfg(feature = "ndarray")]
 impl IntoArray<f64> for Vec<f64> {
+    /// Converts a Vec<f64> to an Array2<f64>, array shape is derived from the number of channels
     fn into_array(self, n_channels: usize) -> Result<Array2<f64>, ShapeError> {
         Array2::from_shape_vec((self.len() / n_channels, n_channels), self)
     }

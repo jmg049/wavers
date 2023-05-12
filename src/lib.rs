@@ -1,12 +1,95 @@
 #![feature(slice_as_chunks)]
+
+//!
+//! The ``wavers`` crate provides a simple interface, with a powerful backend for reading and writing ``.wav`` files.
+//! 
+//! ## Highlights:
+//! 
+//! * Easy to use interface for reading and writing ``.wav`` files.
+//! * Benchmarking shows it is faster than ``hound`` for reading ``.wav`` files. Hound is still better for writing.
+//! * Currently supports reading and writing of ``i16``, ``i32``, ``f32`` and ``f64`` wav files.
+//! * Supports easy conversion between different types of ``.wav`` files.
+//! * Supports reading and writing of multi-channel ``.wav`` files.
+//! * Has optional support reading ``.wav`` files as ``ndarray`` arrays.
+//! 
+//! # Examples
+//! The following examples show how to read and write ``.wav`` files in wavers. For more fine-grained control over the reading and writing of ``.wav`` files see the ``wavers::WavFile`` struct.
+//! ## Reading a ``.wav`` file
+//! To do this we can simple use the ``wavers::read`` read function and an Option ``Sample`` specifying the desired format. ``None`` will indicate to use the same format as the file.
+//! A ``wavers::sample::Sample`` is used to represent all of the different types of samples that can be read from a ``.wav`` file. 
+//!
+//! 
+//! ```rust
+//! use std::path::Path;
+//! use wavers::{read, Sample};
+//! 
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let fp = Path::new("path/to/file.wav");
+//! 
+//!     // if the file is already in the format we want to work with
+//!     let signal: Vec<Sample> = read(fp, None).expect("Failed to read wav file");
+//! 
+//!     // or if we want to convert to something else
+//!     let f32_signal: Vec<Sample> = read(fp, Some(Sample::F32(0.0))).expect("Failed to read wav file as f32");
+//!     Ok(())
+//! }
+//! ```
+//! 
+//! ## Writing a ``.wav`` file
+//! Writing a wav file can be done by using the ``wavers::write`` function. This function takes a path to write to, a vector of samples, an optional sample type, a sample rate and the number of channels.
+//! 
+//! 
+//! ```rust
+//! use std::path::Path;
+//! use wavers::{read, write, Sample};
+//! 
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let fp = Path::new("path/to/file.wav");
+//! 
+//!     let mut signal: Vec<Sample> = read(fp, Some(Sample::I16(0))).expect("Failed to read wav file");
+//!     let new_fp = Path::new("path/to/new_file.wav");
+//!     let sample_rate = 16000;
+//!     let n_channels = 1;
+//!     write(new_fp, &mut signal, Some(Sample::F32(0.0)), sample_rate, n_channels).expect("Failed to write wav file");
+//!     Ok(())
+//! }
+//! ```
+//! 
+//! ## Crate Status
+//! * Still very much in development.
+//! * The API is not stable and is subject to change.
+//! * The API is not fully documented yet.
+//! * The API is not fully tested yet.
+//! * The API is not fully benchmarked yet.
+//! * Targeting a 1.0 release in the next few months.
+//! * 1.0 release will be fully documented, tested and benchmarked. 
+//! * 1.0 release will have a stable API.
+//! * 1.0 release will have the following features:
+//!    * Reading and writing of ``.wav`` files.
+//!    * Conversion between different types of ``.wav`` files.
+//!    * Reading and writing of ``.wav`` files as ``ndarray`` arrays (maybe in parallel in future if it is worth it).
+//!    * Iteration over ``.wav`` files in windows which are lazy loaded (i.e. only loaded into memory when needed).
+//!    * Iteration over each cahnnel of a ``.wav`` file. 
+//! 
+//! ## Crate Feature Flags
+//! The following feature flags are available:
+//! * ``ndarray``: Enables reading and writing of ``.wav`` files as ``ndarray`` arrays by using the ``wavers::IntoArray`` trait.
+//! 
+//! ## Crate Benchmarks
+//! The following benchmarks are available:
+//! * ``wavers::read`` vs ``hound::WavReader``: This benchmark compares the performance of ``wavers::read`` to ``hound::WavReader``. The benchmark is run on both mono and stereo ``.wav`` files. The results are shown below:
+//!     * Mono ``.wav`` file:
+//!
+//!     * Stereo ``.wav`` file:
+//! 
+
+
 pub mod sample;
 pub mod wave;
+pub mod iter;
 
 pub use sample::{AudioConversion, IterAudioConversion, Sample};
-pub use wave::{
-    read, signal_channels, signal_duration, signal_info, signal_sample_rate, write_wav_as,
-    SignalInfo, WavFile,
-};
+pub use wave::{read, write, WavFile, SignalInfo, signal_channels, signal_duration, signal_info, signal_sample_rate};
 
 #[cfg(test)]
 mod tests {
@@ -16,7 +99,7 @@ mod tests {
     use super::*;
     use crate::{
         sample::Sample, signal_channels, signal_duration, signal_info, signal_sample_rate,
-        write_wav_as,
+        write,
     };
 
     #[test]
@@ -99,7 +182,7 @@ mod tests {
         let out_id = format!("./test_resources/tmp_out/one_channel_out_{}.wav", id);
         let mut output_fp = Path::new(&out_id);
 
-        write_wav_as(&mut output_fp, &mut signal, Some(Sample::I16(0)), 1, 16000)
+        write(&mut output_fp, &mut signal, Some(Sample::I16(0)), 1, 16000)
             .expect("Failed to write wav file");
 
         let output_signal =
@@ -131,7 +214,7 @@ mod tests {
         let id = Uuid::new_v4();
         let out_id = format!("./test_resources/tmp_out/one_channel_out_{}.wav", id);
         let mut output_fp = Path::new(&out_id);
-        write_wav_as(
+        write(
             &mut output_fp,
             &mut signal,
             Some(Sample::F32(0.0)),
@@ -166,7 +249,7 @@ mod tests {
         let id = Uuid::new_v4();
         let out_id = format!("./test_resources/tmp_out/one_channel_out_{}.wav", id);
         let mut output_fp = Path::new(&out_id);
-        write_wav_as(&mut output_fp, &mut signal, Some(Sample::I16(0)), 2, 16000)
+        write(&mut output_fp, &mut signal, Some(Sample::I16(0)), 2, 16000)
             .expect("Failed to write wav file");
 
         let output_signal = match read(output_fp, Some(Sample::I16(0))) {
@@ -199,7 +282,7 @@ mod tests {
         let id = Uuid::new_v4();
         let out_id = format!("./test_resources/tmp_out/one_channel_out_{}.wav", id);
         let mut output_fp = Path::new(&out_id);
-        write_wav_as(
+        write(
             &mut output_fp,
             &mut signal,
             Some(Sample::F32(0.0)),

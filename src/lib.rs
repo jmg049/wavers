@@ -86,7 +86,7 @@
 
 pub mod sample;
 pub mod wave;
-pub mod iter;
+// pub mod iter;
 
 pub use sample::{AudioConversion, IterAudioConversion, Sample};
 pub use wave::{read, write, WavFile, SignalInfo, signal_channels, signal_duration, signal_info, signal_sample_rate};
@@ -368,6 +368,21 @@ mod tests {
         let info = signal_info(signal_fp);
         assert!(info.is_err());
     }
+
+    // create a test for reading the fmt chunk of a wav file
+    #[test]
+    fn test_read_fmt_chunk() {
+        let signal_fp = Path::new("./test_resources/one_channel.wav");
+        println!("{:?}", wave::signal_duration(signal_fp).unwrap());
+        let fmt_chunk = wave::FmtChunk::from_path(signal_fp).unwrap();
+        assert_eq!(fmt_chunk.format, 1);
+        assert_eq!(fmt_chunk.channels, 1);
+        assert_eq!(fmt_chunk.sample_rate, 16000);
+        assert_eq!(fmt_chunk.byte_rate, 32000);
+        assert_eq!(fmt_chunk.block_align, 2);
+        assert_eq!(fmt_chunk.bits_per_sample, 16);
+    }
+
 
     #[cfg(feature = "ndarray")]
     use crate::wave::IntoArray;

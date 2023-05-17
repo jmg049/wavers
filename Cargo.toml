@@ -10,6 +10,9 @@ license = "MIT"
 repository = "https://github.com/jmg049/wavers/"
 documentation = "https://docs.rs/wavers/"
 
+[lib]
+doctest = false
+
 [toolchain]
 channel = "nightly"
 
@@ -27,6 +30,7 @@ num-traits = "0.2.15"
 numpy = "0.18.0"
 pyo3 = "0.18.1"
 ndarray = {version="0.15.4", optional = true}
+memmap2 = "0.6.1"
 
 [profile.release]
 panic = "abort"

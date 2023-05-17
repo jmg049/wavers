@@ -1,13 +1,13 @@
-//! 
-//! Everything related to how wavers represents and converts Samples. **Very important note:** All maths operations on samples are done in the space of digital representation of sound. i.e. floats are between -1.0 and 1.0. 
-//! 
+//!
+//! Everything related to how wavers represents and converts Samples. **Very important note:** All maths operations on samples are done in the space of digital representation of sound. i.e. floats are between -1.0 and 1.0.
+//!
 
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
 ///
-/// The core enum for representing a single wav file sample in wavers. 
+/// The core enum for representing a single wav file sample in wavers.
 /// Each supported sample type is represented by a variant of this enum.
-/// 
+///
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Sample {
     I16(i16),
@@ -17,12 +17,11 @@ pub enum Sample {
 }
 
 impl Sample {
-
     ///
     /// Converts a a sample to the correct memory representation in bytes of the underlying sample.
-    /// 
+    ///
     /// Returns a vector of bytes representing the sample in little endian format.
-    /// 
+    ///
     pub fn to_le_bytes(self) -> Vec<u8> {
         match self {
             Sample::I16(sample) => sample.to_le_bytes().to_vec(),
@@ -34,9 +33,9 @@ impl Sample {
 
     ///
     /// Converts a a sample to the correct memory representation in bytes of the underlying sample.
-    /// 
+    ///
     /// Returns a vector of bytes representing the sample in native endian format.
-    /// 
+    ///
     pub fn to_ne_bytes(self) -> Vec<u8> {
         match self {
             Sample::I16(sample) => sample.to_ne_bytes().to_vec(),
@@ -48,9 +47,9 @@ impl Sample {
 
     ///
     /// Utility to report the size of the underlying sample in bytes.
-    /// 
+    ///
     /// Returns the size of the underlying sample in bytes.
-    /// 
+    ///
     #[inline(always)]
     pub fn size_of_underlying(&self) -> usize {
         match self {
@@ -67,20 +66,20 @@ impl Add for Sample {
 
     ///
     /// Enables addition of two samples. Note that the rhs is converted to the sample type of the lhs.
-    /// 
+    ///
     /// Returns the sum of the two samples.
-    /// 
+    ///
     /// ## Example
     /// ```rust
     /// use wavers::Sample;
-    /// 
+    ///
     /// fn main() {
     ///     let sample1 = Sample::I16(1);
     ///     let sample2 = Sample::I16(2);
     ///     println!("{:?}", sample1 + sample2);
     /// }
     /// ```
-    /// 
+    ///
     fn add(self, rhs: Self) -> Self::Output {
         match self {
             Sample::I16(x) => Sample::I16(x + rhs.as_i16()),
@@ -96,20 +95,20 @@ impl Sub for Sample {
 
     ///
     /// Enables subtraction of two samples. Note that the rhs is converted to the sample type of the lhs.
-    /// 
+    ///
     /// Returns the difference of the two samples.
-    /// 
+    ///
     /// ## Example
     /// ```rust
     /// use wavers::Sample;
-    /// 
+    ///
     /// fn main() {
     ///     let sample1 = Sample::I16(1);
     ///     let sample2 = Sample::I16(2);
     ///     println!("{:?}", sample1 - sample2);
     /// }
     /// ```
-    /// 
+    ///
     fn sub(self, rhs: Self) -> Self::Output {
         match self {
             Sample::I16(x) => Sample::I16(x - rhs.as_i16()),
@@ -125,20 +124,20 @@ impl Mul for Sample {
 
     ///
     /// Enables multiplication of two samples. Note that the rhs is converted to the sample type of the lhs.
-    /// 
+    ///
     /// Returns the product of the two samples.
-    /// 
+    ///
     /// ## Example
     /// ```rust
     /// use wavers::Sample;
-    /// 
+    ///
     /// fn main() {
     ///    let sample1 = Sample::I16(1);
     ///   let sample2 = Sample::I16(2);
     ///    println!("{:?}", sample1 * sample2);
     /// }
     /// ```
-    /// 
+    ///
     fn mul(self, rhs: Self) -> Self::Output {
         match self {
             Sample::I16(x) => Sample::I16(x * rhs.as_i16()),
@@ -154,21 +153,21 @@ impl Div for Sample {
 
     ///
     /// Enables division of two samples. Note that the rhs is converted to the sample type of the lhs.
-    /// 
+    ///
     /// Returns the result of division of the two samples.
-    /// 
+    ///
     /// ## Example
-    /// 
+    ///
     /// ```rust
     /// use wavers::Sample;
-    /// 
+    ///
     /// fn main() {
     ///    let sample1 = Sample::I16(4);
     ///   let sample2 = Sample::I16(2);
     ///     println!("{:?}", sample1 / sample2);
     /// }
     /// ```
-    /// 
+    ///
     fn div(self, rhs: Self) -> Self::Output {
         match self {
             Sample::I16(x) => Sample::I16(x / rhs.as_i16()),
@@ -184,20 +183,20 @@ impl Neg for Sample {
 
     ///
     /// Enables negation of a sample.
-    /// 
+    ///
     /// Returns the negation of the sample.
-    /// 
+    ///
     /// ## Example
-    /// 
+    ///
     /// ```rust
     /// use wavers::Sample;
-    /// 
+    ///
     /// fn main() {
     ///    let sample1 = Sample::I16(1);
     ///    println!("{:?}", -sample1);
     /// }
     /// ```
-    /// 
+    ///
     fn neg(self) -> Self::Output {
         match self {
             Sample::I16(x) => Sample::I16(-x),
@@ -210,7 +209,7 @@ impl Neg for Sample {
 
 ///
 /// Trait which enables the easy conversion of samples to other sample types.
-/// 
+///
 pub trait AudioConversion {
     fn as_i16(self) -> i16;
     fn as_i32(self) -> i32;
@@ -231,7 +230,7 @@ pub trait AudioConversion {
 
 ///
 /// Trait which enables the easy conversion of iterators of samples to other sample types.
-/// 
+///
 pub trait IterAudioConversion {
     fn as_i16(&mut self) -> Vec<i16>;
     fn as_i32(&mut self) -> Vec<i32>;
@@ -274,11 +273,10 @@ pub trait IterAudioConversion {
     }
 }
 
-
 impl AudioConversion for Sample {
-    /// 
+    ///
     /// Converts a sample to an i16.
-    /// 
+    ///
     fn as_i16(self) -> i16 {
         match self {
             Sample::I16(sample) => sample,
@@ -290,7 +288,7 @@ impl AudioConversion for Sample {
 
     ///
     /// Converts a sample to an i32.
-    /// 
+    ///
     fn as_i32(self) -> i32 {
         match self {
             Sample::I16(sample) => sample.as_i32(),
@@ -302,7 +300,7 @@ impl AudioConversion for Sample {
 
     ///
     /// Converts a sample to an f32.
-    /// 
+    ///
     fn as_f32(self) -> f32 {
         match self {
             Sample::I16(sample) => sample.as_f32(),
@@ -314,7 +312,7 @@ impl AudioConversion for Sample {
 
     ///
     /// Converts a sample to an f64.
-    /// 
+    ///
     fn as_f64(self) -> f64 {
         match self {
             Sample::I16(sample) => sample.as_f64(),
@@ -326,7 +324,7 @@ impl AudioConversion for Sample {
 
     ///
     /// Converts a sample to another, given sample type.
-    /// 
+    ///
     fn as_type(self, as_type: Sample) -> Sample {
         match as_type {
             Sample::I16(_) => Sample::I16(self.as_i16()),
@@ -340,7 +338,7 @@ impl AudioConversion for Sample {
 impl IterAudioConversion for Vec<Sample> {
     ///
     /// Converts a vector of samples to i16.
-    /// 
+    ///
     fn as_i16(&mut self) -> Vec<i16> {
         self.iter_mut()
             .map(|sample| sample.as_i16())
@@ -349,7 +347,7 @@ impl IterAudioConversion for Vec<Sample> {
 
     ///
     /// Converts a vector of samples to i32.
-    /// 
+    ///
     fn as_i32(&mut self) -> Vec<i32> {
         self.iter_mut()
             .map(|sample| sample.as_i32())
@@ -358,7 +356,7 @@ impl IterAudioConversion for Vec<Sample> {
 
     ///
     /// Converts a vector of samples to f32.
-    /// 
+    ///
     fn as_f32(&mut self) -> Vec<f32> {
         self.iter_mut()
             .map(|sample| sample.as_f32())
@@ -367,7 +365,7 @@ impl IterAudioConversion for Vec<Sample> {
 
     ///
     /// Converts a vector of samples to f64.
-    /// 
+    ///
     fn as_f64(&mut self) -> Vec<f64> {
         self.iter_mut()
             .map(|sample| sample.as_f64())
@@ -375,127 +373,121 @@ impl IterAudioConversion for Vec<Sample> {
     }
 }
 
-
 impl AudioConversion for i16 {
     ///
     /// Converts an i16 to an i16.
-    /// 
+    ///
     fn as_i16(self) -> i16 {
         self
     }
 
-
     ///
     /// Converts an i16 to an i32.
-    /// 
+    ///
     fn as_i32(self) -> i32 {
         self as i32
     }
 
     ///
     /// Converts an i16 to an f32.
-    /// 
+    ///
     fn as_f32(self) -> f32 {
         (self as f32 / 32768.0).clamp(-1.0, 1.0)
     }
 
     ///
     /// Converts an i16 to an f64.
-    /// 
+    ///
     fn as_f64(self) -> f64 {
         (self as f64 / 32768.0).clamp(-1.0, 1.0)
     }
 }
 
 impl AudioConversion for i32 {
-    
     ///
     /// Converts an i32 to an i16.
-    /// 
+    ///
     fn as_i16(self) -> i16 {
         (self >> 16) as i16
     }
 
     ///
     /// Converts an i32 to an i32.
-    /// 
+    ///
     fn as_i32(self) -> i32 {
         self
     }
 
-
     ///
     /// Converts an i32 to an f32.
-    /// 
+    ///
     fn as_f32(self) -> f32 {
         (self as f32 / 2147483648.0).clamp(-1.0, 1.0)
     }
 
     ///
     /// Converts an i32 to an f64.
-    /// 
+    ///
     fn as_f64(self) -> f64 {
         (self as f64 / 2147483648.0).clamp(-1.0, 1.0)
     }
 }
 
 impl AudioConversion for f32 {
-
     ///
     /// Converts an f32 to an i16.
-    /// 
+    ///
     fn as_i16(self) -> i16 {
         (self * 32768.0).clamp(-32768.0, 32767.0) as i16
     }
 
     ///
     /// Converts an f32 to an i32.
-    /// 
+    ///
     fn as_i32(self) -> i32 {
         (self * 2147483648.0).clamp(-2147483648.0, 2147483647.0) as i32
     }
 
     ///
     /// Converts an f32 to an f32.
-    /// 
+    ///
     fn as_f32(self) -> f32 {
         self
     }
 
     ///
     /// Converts an f32 to an f64.
-    /// 
+    ///
     fn as_f64(self) -> f64 {
         self as f64
     }
 }
 
 impl AudioConversion for f64 {
-
     ///
     /// Converts an f64 to an i16.
-    /// 
+    ///
     fn as_i16(self) -> i16 {
         (self * 32768.0).clamp(-32768.0, 32767.0) as i16
     }
 
     ///
     /// Converts an f64 to an i32.
-    /// 
+    ///
     fn as_i32(self) -> i32 {
         (self * 2147483648.0).clamp(-2147483648.0, 2147483647.0) as i32
     }
 
     ///
     /// Converts an f64 to an f32.
-    /// 
+    ///
     fn as_f32(self) -> f32 {
         self as f32
     }
 
     ///
     /// Converts an f64 to an f64.
-    /// 
+    ///
     fn as_f64(self) -> f64 {
         self
     }
@@ -560,7 +552,7 @@ impl PartialEq<f64> for Sample {
 pub mod sample_test {
     ///
     /// Tests the Sample struct.
-    /// 
+    ///
     use super::Sample;
 
     #[test]

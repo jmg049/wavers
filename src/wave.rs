@@ -9,6 +9,7 @@ use std::{
 
 use memmap2::Mmap;
 use crate::sample::{IterAudioConversion, Sample};
+use memmap2::Mmap;
 
 const RIFF: &[u8; 4] = b"RIFF";
 const DATA: &[u8; 4] = b"data";
@@ -31,23 +32,38 @@ pub struct WavFile {
 }
 
 impl WavFile {
-
-    /// 
+    ///
     /// Create a new ``WavFile`` from a ``FmtChunk``, a boxed slice of ``u8`` and the position of the data chunk in the file.
-    /// 
+    ///
     /// Returns a ``WavFile``.
+<<<<<<< HEAD
     /// 
+=======
+    ///
+>>>>>>> e0a037f (Switch to Mmap instead of storing the Box<Vec<u8>>)
     pub fn new(fp: &Path, seek_pos: usize) -> WavFile {
         let file = match File::open(&fp) {
             Ok(f) => f,
             Err(e) => panic!("Error opening file: {}", e),
         };
+<<<<<<< HEAD
         let mmap = unsafe { match Mmap::map(&file) {
             Ok(m) => m,
             Err(e) => panic!("Error mapping file: {}", e),
         }};
         let fmt_chunk = FmtChunk::from_buf_reader(&mmap).expect("Error reading FMT chunk");
         let (data_offset, data_size) = find_sub_chunk_id(&mmap, &b"data").expect("Error reading data chunk");
+=======
+        let mmap = unsafe {
+            match Mmap::map(&file) {
+                Ok(m) => m,
+                Err(e) => panic!("Error mapping file: {}", e),
+            }
+        };
+        let fmt_chunk = FmtChunk::from_buf_reader(&mmap).expect("Error reading FMT chunk");
+        let (data_offset, data_size) =
+            find_sub_chunk_id(&mmap, &b"data").expect("Error reading data chunk");
+>>>>>>> e0a037f (Switch to Mmap instead of storing the Box<Vec<u8>>)
 
         WavFile {
             mmap,
@@ -62,12 +78,12 @@ impl WavFile {
     /// Read a file from disk and return a ``WavFile``
     ///
     /// Returns a ``WavFile`` if the file is successfully read. Otherwise, returns an ``std::io::Error``.
-    /// 
+    ///
     /// # Examples
     /// ```rust
     /// use wavers::WavFile;
     /// use std::path::Path;
-    /// 
+    ///
     /// fn main() {
     ///     let wav_file = WavFile::from_file(Path::new("path/to/file.wav")).expect("Error reading file");
     ///     println!("Sample rate: {}", wav_file.sample_rate());
@@ -76,11 +92,14 @@ impl WavFile {
     ///
     pub fn from_file(fp: &Path) -> Result<WavFile, std::io::Error> {
         Ok(WavFile::new(fp, 0))
+<<<<<<< HEAD
 
         // let fmt_chunk = FmtChunk::from_buf_reader(&mmap)?;
         // let (data_offset, data_len) = find_sub_chunk_id(&mmap, &b"data")?;
         // let mut data = mmap[data_offset..data_offset + data_len]);
         // Ok(WavFile::new(fmt_chunk, data, 0))
+=======
+>>>>>>> e0a037f (Switch to Mmap instead of storing the Box<Vec<u8>>)
     }
 
     ///
@@ -88,7 +107,7 @@ impl WavFile {
     /// This funcions converts the underlying ``u8`` buffer to a vector of Samples.
     ///
     /// Returns a ``Vec<Sample>``.
-    /// 
+    ///
     /// Panics if the sample type is not supported.
     ///
     #[inline]
@@ -139,21 +158,21 @@ impl WavFile {
     /// recalculated. Any modification of the wav data will be be written provided that the original format is preserved.
     ///
     /// To write a different type of sample, use the function ``wavers::write`` and pass in the desired sample type.
-    /// 
+    ///
     /// Returns an error if the file cannot be created or written to.
     ///
     /// ## Examples
-    /// 
+    ///
     /// ```rust
     /// use wavers::WavFile;
     /// use std::path::Path;
-    /// 
+    ///
     /// fn main() {
     ///     let wav_file = WavFile::from_file(Path::new("path/to/file.wav")).expect("Error reading file");
     ///     wav_file.write(Path::new("path/to/new_file.wav")).expect("Error writing file");
     /// }
     /// ```
-    /// 
+    ///
     pub fn write(&self, fp: &Path) -> Result<(), std::io::Error> {
         let file = File::create(fp)?;
         let mut buf_writer = BufWriter::new(file);
@@ -179,7 +198,7 @@ impl WavFile {
     /// Reads the underlying wav data as 16-bit signed integer PCM samples.
     ///
     /// Returns a ``Vec<Sample>`` which contains the **interleaved** channel samples.
-    /// 
+    ///
     /// Panics if there is an error reading the data. Will likely change this to return a result in future.
     ///
     #[inline]
@@ -194,7 +213,14 @@ impl WavFile {
         let mut idx = 0;
         let iter_step = 2 * n_channels; // two bytes per sample per channel
 
+<<<<<<< HEAD
         for samples in self.mmap[self.data_offset+self.seek_pos..self.data_offset+self.data_size].chunks(iter_step) {
+=======
+        for samples in self.mmap
+            [self.data_offset + self.seek_pos..self.data_offset + self.data_size]
+            .chunks(iter_step)
+        {
+>>>>>>> e0a037f (Switch to Mmap instead of storing the Box<Vec<u8>>)
             unsafe {
                 for channel_sample in
                     samples.as_chunks_unchecked::<{ std::mem::size_of::<i16>() }>()
@@ -211,7 +237,7 @@ impl WavFile {
     /// Reads the underlying wav data as 32-bit signed integer PCM samples.
     ///
     /// Returns a ``Vec<Sample>`` which contains the **interleaved** channel samples.
-    /// 
+    ///
     /// Panics if there is an error reading the data. Will likely change this to return a result in future.
     ///
     fn read_pcm_i32(&self) -> Vec<Sample> {
@@ -225,7 +251,14 @@ impl WavFile {
         let mut idx = 0;
         let iter_step = 4 * n_channels; // four bytes per sample per channel
 
+<<<<<<< HEAD
         for samples in self.mmap[self.data_offset+self.seek_pos..self.data_offset+self.data_size].chunks(iter_step) {
+=======
+        for samples in self.mmap
+            [self.data_offset + self.seek_pos..self.data_offset + self.data_size]
+            .chunks(iter_step)
+        {
+>>>>>>> e0a037f (Switch to Mmap instead of storing the Box<Vec<u8>>)
             unsafe {
                 for channel_sample in
                     samples.as_chunks_unchecked::<{ std::mem::size_of::<i32>() }>()
@@ -242,7 +275,7 @@ impl WavFile {
     /// Reads the underlying wav data as 32-bit IEEE floating point PCM samples.
     ///
     /// Returns a ``Vec<Sample>`` which contains the **interleaved** channel samples.
-    /// 
+    ///
     /// Panics if there is an error reading the data. Will likely change this to return a result in future.
     ///
     fn read_ieee_f32(&self) -> Vec<Sample> {
@@ -256,7 +289,14 @@ impl WavFile {
         let mut idx = 0;
         let iter_step = 4 * n_channels; // four bytes per sample per channel
 
+<<<<<<< HEAD
         for samples in self.mmap[self.data_offset+self.seek_pos..self.data_offset+self.data_size].chunks(iter_step) {
+=======
+        for samples in self.mmap
+            [self.data_offset + self.seek_pos..self.data_offset + self.data_size]
+            .chunks(iter_step)
+        {
+>>>>>>> e0a037f (Switch to Mmap instead of storing the Box<Vec<u8>>)
             unsafe {
                 for channel_sample in
                     samples.as_chunks_unchecked::<{ std::mem::size_of::<f32>() }>()
@@ -273,7 +313,7 @@ impl WavFile {
     /// Reads the underlying wav data as 64-bit IEEE floating point PCM samples.
     ///
     /// Returns a ``Vec<Sample>`` which contains the **interleaved** channel samples.
-    /// 
+    ///
     /// Panics if there is an error reading the data. Will likely change this to return a result in future.
     ///
     fn read_ieee_f64(&self) -> Vec<Sample> {
@@ -287,7 +327,14 @@ impl WavFile {
         let mut idx = 0;
         let iter_step = 8 * n_channels; // eight bytes per sample per channel
 
+<<<<<<< HEAD
         for samples in self.mmap[self.data_offset+self.seek_pos..self.data_offset+self.data_size].chunks(iter_step) {
+=======
+        for samples in self.mmap
+            [self.data_offset + self.seek_pos..self.data_offset + self.data_size]
+            .chunks(iter_step)
+        {
+>>>>>>> e0a037f (Switch to Mmap instead of storing the Box<Vec<u8>>)
             unsafe {
                 for channel_sample in
                     samples.as_chunks_unchecked::<{ std::mem::size_of::<f64>() }>()
@@ -357,10 +404,19 @@ pub fn signal_duration(signal_fp: &Path) -> Result<u64, std::io::Error> {
     let (data_offset, _) = find_sub_chunk_id(&mmap, &DATA)?;
     let mut data_size_buf: [u8; 4] = [0; 4];
 
+<<<<<<< HEAD
     data_size_buf.copy_from_slice(&mmap[data_offset-4..data_offset]);
     let data_size:i32 = i32::from_ne_bytes(data_size_buf);
     Ok(data_size as u64 / (fmt_chunk.sample_rate() * fmt_chunk.channels() as i32 * (fmt_chunk.bits_per_sample() / 8) as i32) as u64)
 
+=======
+    data_size_buf.copy_from_slice(&mmap[data_offset - 4..data_offset]);
+    let data_size: i32 = i32::from_ne_bytes(data_size_buf);
+    Ok(data_size as u64
+        / (fmt_chunk.sample_rate()
+            * fmt_chunk.channels() as i32
+            * (fmt_chunk.bits_per_sample() / 8) as i32) as u64)
+>>>>>>> e0a037f (Switch to Mmap instead of storing the Box<Vec<u8>>)
 }
 
 ///
@@ -389,7 +445,7 @@ pub fn signal_channels(signal_fp: &Path) -> Result<u16, std::io::Error> {
 
 ///
 /// A struct containing information about a wav file. This data is read from the header of the wav file. Usefuly if you want to know the properties of a wav file without reading the entire file.
-/// 
+///
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SignalInfo {
     pub sample_rate: i32,
@@ -399,10 +455,9 @@ pub struct SignalInfo {
 }
 
 impl SignalInfo {
-
     ///
     /// Creates a new ``SignalInfo`` struct.
-    /// 
+    ///
     pub fn new(sample_rate: i32, channels: u16, bits_per_sample: u16, duration: u64) -> Self {
         Self {
             sample_rate,
@@ -415,9 +470,9 @@ impl SignalInfo {
 
 ///
 /// Returns a ``SignalInfo`` struct containing information about a wav file without reading the entire file, only the necessary header information.
-/// 
+///
 /// Returns an error if the file is not a valid wav file or does not exist.
-/// 
+///
 pub fn signal_info(signal_fp: &Path) -> Result<SignalInfo, std::io::Error> {
     let wav_file = File::open(signal_fp)?;
     let mmap: Mmap = unsafe { Mmap::map(&wav_file)? };
@@ -425,7 +480,11 @@ pub fn signal_info(signal_fp: &Path) -> Result<SignalInfo, std::io::Error> {
 
     let (data_offset, _) = find_sub_chunk_id(&mmap, &b"data")?;
     let mut data_size_buf: [u8; 4] = [0; 4];
+<<<<<<< HEAD
     data_size_buf.copy_from_slice(&mmap[data_offset-4..data_offset]);
+=======
+    data_size_buf.copy_from_slice(&mmap[data_offset - 4..data_offset]);
+>>>>>>> e0a037f (Switch to Mmap instead of storing the Box<Vec<u8>>)
 
     Ok(SignalInfo::new(
         fmt_chunk.sample_rate(),
@@ -441,16 +500,16 @@ pub fn signal_info(signal_fp: &Path) -> Result<SignalInfo, std::io::Error> {
 ///
 /// **Important function**: Reads a wav file into a vector of samples. This function reads the entire file into memory.
 /// Using this function allows you to read a wav file into a vector of samples without having to worry about the wav file's header information or holding onto the other wav file details.
-/// 
+///
 /// Also allows for specifying the type of the samples in the wav file. If the type is not specified, the type of the samples will be the same as the type of the samples in the wav file.
-/// 
+///
 /// Returns an error if the file is not a valid wav file or does not exist.
-/// 
+///
 /// # Example
 /// ```rust
 /// use wavers::read;
 /// use std::path::Path;
-/// 
+///
 /// fn main() {
 ///     let signal_fp = Path::new("signal.wav");
 ///     let signal = read(signal_fp, None).expect("Failed to read signal");
@@ -467,16 +526,16 @@ pub fn read(fp: &Path, as_type: Option<Sample>) -> Result<Vec<Sample>, std::io::
 /// This function does not preserve the original file's header information. Only the RIFF, WAVE, FMT and DATA chunks are written.
 ///
 /// Returns an error if the file cannot be created or if it cannot write to the file.
-/// 
+///
 /// # Example
 /// ```rust
 /// use std::path::Path;
 /// use wavers::{write, Sample};
-/// 
+///
 /// fn main() {
 ///     let mut samples = (0..16000).map(|x| Sample::I16(x)).collect();
 ///     let signal_fp = Path::new("signal.wav");
-/// 
+///
 ///     // write i16 samples as f32 samples
 ///     write(signal_fp, &mut samples, Some(Sample::F32(0.0)), 1, 16000).expect("Failed to write signal");
 /// }
@@ -553,25 +612,6 @@ pub fn write(
 }
 
 ///
-/// Create a boxed ``u8`` buffer of the given size. The buffer is zeroed. Used when reading and writing wav files.
-///
-/// Panics if the buffer cannot be allocated.
-///
-fn alloc_box_buffer(len: usize) -> Box<[u8]> {
-    if len == 0 {
-        return <Box<[u8]>>::default();
-    }
-    let layout = match Layout::array::<u8>(len) {
-        Ok(layout) => layout,
-        Err(_) => panic!("Failed to allocate buffer of size {}", len),
-    };
-
-    let ptr = unsafe { std::alloc::alloc(layout) };
-    let slice_ptr = core::ptr::slice_from_raw_parts_mut(ptr, len);
-    unsafe { Box::from_raw(slice_ptr) }
-}
-
-///
 /// A struct for storing the necessary format information about a wav file.
 ///
 /// In total the struct is 20 bytes. 4 bytes storing the size of the chunk
@@ -645,6 +685,7 @@ impl FmtChunk {
         let (offset, _) = find_sub_chunk_id(br, b"fmt ")?;
         let mut bytes_tranversed = offset - 4;
 
+<<<<<<< HEAD
         buf.copy_from_slice(&br[bytes_tranversed..bytes_tranversed+4]);
         let size = i32::from_ne_bytes(buf);
         bytes_tranversed += 4;
@@ -670,6 +711,33 @@ impl FmtChunk {
         bytes_tranversed += 2;
 
         buf_two.copy_from_slice(&br[bytes_tranversed..bytes_tranversed+2]);
+=======
+        buf.copy_from_slice(&br[bytes_tranversed..bytes_tranversed + 4]);
+        let size = i32::from_ne_bytes(buf);
+        bytes_tranversed += 4;
+
+        buf_two.copy_from_slice(&br[bytes_tranversed..bytes_tranversed + 2]);
+        let format = u16::from_ne_bytes(buf_two);
+        bytes_tranversed += 2;
+
+        buf_two.copy_from_slice(&br[bytes_tranversed..bytes_tranversed + 2]);
+        let channels = u16::from_ne_bytes(buf_two);
+        bytes_tranversed += 2;
+
+        buf.copy_from_slice(&br[bytes_tranversed..bytes_tranversed + 4]);
+        let sample_rate = i32::from_ne_bytes(buf);
+        bytes_tranversed += 4;
+
+        buf.copy_from_slice(&br[bytes_tranversed..bytes_tranversed + 4]);
+        let byte_rate = i32::from_ne_bytes(buf);
+        bytes_tranversed += 4;
+
+        buf_two.copy_from_slice(&br[bytes_tranversed..bytes_tranversed + 2]);
+        let block_align = u16::from_ne_bytes(buf_two);
+        bytes_tranversed += 2;
+
+        buf_two.copy_from_slice(&br[bytes_tranversed..bytes_tranversed + 2]);
+>>>>>>> e0a037f (Switch to Mmap instead of storing the Box<Vec<u8>>)
         let bits_per_sample = u16::from_ne_bytes(buf_two);
         Ok(FmtChunk::new(
             size,
@@ -746,6 +814,7 @@ impl FmtChunk {
 /// Returns an error if the sub-chunk id cannot be found.
 ///
 
+<<<<<<< HEAD
 fn find_sub_chunk_id(
     file: &Mmap,
     chunk_id: &[u8; 4],
@@ -757,6 +826,14 @@ fn find_sub_chunk_id(
     buf.copy_from_slice(&file[0..4]);
     
     
+=======
+fn find_sub_chunk_id(file: &Mmap, chunk_id: &[u8; 4]) -> Result<(usize, usize), std::io::Error> {
+    let mut buf: [u8; 4] = [0; 4];
+    // Find the RIFF Tag
+
+    buf.copy_from_slice(&file[0..4]);
+
+>>>>>>> e0a037f (Switch to Mmap instead of storing the Box<Vec<u8>>)
     if !buf_eq(&buf, RIFF) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::Other,
@@ -773,6 +850,7 @@ fn find_sub_chunk_id(
         // First sub-chunk is guaranteed to begin at byte 12 so seek forward by 8.
         // No other chunk is at a guaranteed offset.
         // let bytes_read = file.read(&mut buf)?;
+<<<<<<< HEAD
         
         // loose expected structure is that the first field in a chunk is the id and the second is the size
         // so we can read the first 8 bytes and then the size of the chunk and then the next 8 bytes then skip
@@ -792,6 +870,30 @@ fn find_sub_chunk_id(
         std::io::ErrorKind::Other,
         format!("Failed to find {:?} tag", chunk_id)),
     )
+=======
+
+        // loose expected structure is that the first field in a chunk is the id and the second is the size
+        // so we can read the first 8 bytes and then the size of the chunk and then the next 8 bytes then skip
+        let current_chunk_id = &file[bytes_traversed..bytes_traversed + 4];
+        let chunk_len = &file[bytes_traversed + 4..bytes_traversed + 8];
+        let chunk_len = chunk_len[0] as u32
+            | (chunk_len[1] as u32) << 8
+            | (chunk_len[2] as u32) << 16
+            | (chunk_len[3] as u32) << 24;
+
+        bytes_traversed += 8;
+
+        if chunk_id == current_chunk_id {
+            return Ok((bytes_traversed, chunk_len as usize));
+        }
+
+        bytes_traversed += chunk_len as usize;
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        format!("Failed to find {:?} tag", chunk_id),
+    ))
+>>>>>>> e0a037f (Switch to Mmap instead of storing the Box<Vec<u8>>)
 }
 
 /// Function to compare two 4-byte arrays for equality.

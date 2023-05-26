@@ -1,6 +1,6 @@
 [package]
 name = "wavers"
-version = "0.2.5"
+version = "0.3"
 edition = "2021"
 authors = ["Jack Geraghty (jmg049)"]
 description = "A Rust crate for reading and writing WAVE files."

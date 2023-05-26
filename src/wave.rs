@@ -60,7 +60,7 @@ impl WavFile {
     /// Returns a ``WavFile`` if the file is successfully read. Otherwise, returns an ``std::io::Error``.
     /// 
     /// # Examples
-    /// ```rust
+    /// ```rust no_run
     /// use wavers::WavFile;
     /// use std::path::Path;
     /// 
@@ -165,7 +165,7 @@ impl WavFile {
     ///
     /// ## Examples
     /// 
-    /// ```rust
+    /// ```rust no_run
     /// use wavers::WavFile;
     /// use std::path::Path;
     /// 

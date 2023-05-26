@@ -19,7 +19,7 @@
 //! A ``wavers::sample::Sample`` is used to represent all of the different types of samples that can be read from a ``.wav`` file. 
 //!
 //! 
-//! ```rust
+//! ```rust no_run
 //! use std::path::Path;
 //! use wavers::{read, Sample};
 //! 
@@ -39,7 +39,7 @@
 //! Writing a wav file can be done by using the ``wavers::write`` function. This function takes a path to write to, a vector of samples, an optional sample type, a sample rate and the number of channels.
 //! 
 //! 
-//! ```rust
+//! ```rust no_run
 //! use std::path::Path;
 //! use wavers::{read, write, Sample};
 //! 

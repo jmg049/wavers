@@ -6,7 +6,10 @@ use std::{
     u8,
 };
 
-use crate::sample::{IterAudioConversion, Sample};
+use crate::{
+    sample::{IterAudioConversion, Sample},
+    WavIterator,
+};
 
 const RIFF: &[u8; 4] = b"RIFF";
 const DATA: &[u8; 4] = b"data";
@@ -86,7 +89,22 @@ impl WavFile {
         Ok(WavFile::new(fmt_chunk, data, 0))
     }
 
-    ///
+    pub fn iter_as(&self, as_type: Sample) -> WavIterator {
+        WavIterator::new(&self, Some(as_type))
+    }
+
+    pub fn iter_as_mut(&mut self, as_type: Sample) -> WavIterator {
+        WavIterator::new(&self, Some(as_type))
+    }
+
+    pub fn iter(&self) -> WavIterator {
+        WavIterator::new(&self, None)
+    }
+
+    pub fn iter_mut(&mut self) -> WavIterator {
+        WavIterator::new(&self, None)
+    }
+
     /// Read the underlying wave data into the desired sample type. If no sample type is given, the original sample type will be used.
     /// This funcions converts the underlying ``u8`` buffer to a vector of Samples.
     ///
@@ -302,6 +320,10 @@ impl WavFile {
         }
 
         channel_data
+    }
+
+    pub fn len(&self) -> usize {
+        self.data.len()
     }
 
     ///

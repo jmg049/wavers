@@ -6,7 +6,7 @@
 //! ## Highlights:
 //! 
 //! * Easy to use interface for reading and writing ``.wav`` files.
-//! * Benchmarking shows it is faster than ``hound`` for reading ``.wav`` files. Hound is still better for writing.
+//! * Benchmarking shows it has faster or similar performance to ``hound`` for reading ``.wav`` files. Hound is still better for writing.
 //! * Currently supports reading and writing of ``i16``, ``i32``, ``f32`` and ``f64`` wav files.
 //! * Supports easy conversion between different types of ``.wav`` files.
 //! * Supports reading and writing of multi-channel ``.wav`` files.
@@ -90,6 +90,7 @@ pub mod iter;
 
 pub use sample::{AudioConversion, IterAudioConversion, Sample};
 pub use wave::{read, write, WavFile, SignalInfo, signal_channels, signal_duration, signal_info, signal_sample_rate};
+pub use iter::{WavIterator};
 
 #[cfg(test)]
 mod tests {

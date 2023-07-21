@@ -87,6 +87,8 @@
 pub mod sample;
 pub mod wave;
 pub mod iter;
+pub mod wav;
+pub mod fmt_chunk;
 
 pub use sample::{AudioConversion, IterAudioConversion, Sample};
 pub use wave::{read, write, WavFile, SignalInfo, signal_channels, signal_duration, signal_info, signal_sample_rate};

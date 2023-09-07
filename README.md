@@ -12,7 +12,7 @@
 [crate-pywavers-docrs-img]: https://img.shields.io/badge/Docs-56B4E9?style=for-the-badge&labelColor=gray
 
 
-[crate-pywavers-readdocs-img]:  https://img.shields.io/badge/Read%The$Docs-56B4E9?style=for-the-badge&labelColor=gray
+[crate-pywavers-readdocs-img]:  https://img.shields.io/badge/Read_The_Docs-56B4E9?style=for-the-badge&labelColor=gray
 
 [crate]:         https://crates.io/crates/wavers
 

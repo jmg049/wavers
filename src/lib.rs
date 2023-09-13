@@ -1,439 +1,138 @@
-#![feature(slice_as_chunks)]
-
+#![feature(const_type_id)]
 //!
-//! The ``wavers`` crate provides a simple interface, with a powerful backend for reading and writing ``.wav`` files.
-//! 
-//! ## Highlights:
-//! 
-//! * Easy to use interface for reading and writing ``.wav`` files.
-//! * Benchmarking shows it has faster or similar performance to ``hound`` for reading ``.wav`` files. Hound is still better for writing.
-//! * Currently supports reading and writing of ``i16``, ``i32``, ``f32`` and ``f64`` wav files.
-//! * Supports easy conversion between different types of ``.wav`` files.
-//! * Supports reading and writing of multi-channel ``.wav`` files.
-//! * Has optional support reading ``.wav`` files as ``ndarray`` arrays.
-//! 
-//! # Examples
-//! The following examples show how to read and write ``.wav`` files in wavers. For more fine-grained control over the reading and writing of ``.wav`` files see the ``wavers::WavFile`` struct.
-//! ## Reading a ``.wav`` file
-//! To do this we can simple use the ``wavers::read`` read function and an Option ``Sample`` specifying the desired format. ``None`` will indicate to use the same format as the file.
-//! A ``wavers::sample::Sample`` is used to represent all of the different types of samples that can be read from a ``.wav`` file. 
+//! # Wavers
+//! WaveRs is a fast and lightweight library for reading and writing ``wav`` files.
+//! Currently, it supports reading and writing of ``i16``, ``i32``, ``f32``, and ``f64`` audio samples.
 //!
-//! 
-//! ```rust no_run
-//! use std::path::Path;
-//! use wavers::{read, Sample};
-//! 
-//! fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let fp = Path::new("path/to/file.wav");
-//! 
-//!     // if the file is already in the format we want to work with
-//!     let signal: Vec<Sample> = read(fp, None).expect("Failed to read wav file");
-//! 
-//!     // or if we want to convert to something else
-//!     let f32_signal: Vec<Sample> = read(fp, Some(Sample::F32(0.0))).expect("Failed to read wav file as f32");
-//!     Ok(())
-//! }
-//! ```
-//! 
-//! ## Writing a ``.wav`` file
-//! Writing a wav file can be done by using the ``wavers::write`` function. This function takes a path to write to, a vector of samples, an optional sample type, a sample rate and the number of channels.
-//! 
-//! 
-//! ```rust no_run
-//! use std::path::Path;
-//! use wavers::{read, write, Sample};
-//! 
-//! fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let fp = Path::new("path/to/file.wav");
-//! 
-//!     let mut signal: Vec<Sample> = read(fp, Some(Sample::I16(0))).expect("Failed to read wav file");
-//!     let new_fp = Path::new("path/to/new_file.wav");
-//!     let sample_rate = 16000;
-//!     let n_channels = 1;
-//!     write(new_fp, &mut signal, Some(Sample::F32(0.0)), sample_rate, n_channels).expect("Failed to write wav file");
-//!     Ok(())
-//! }
-//! ```
-//! 
+//! ## Highlights
+//! * Fast and lightweight
+//! * Simple API, read a wav file with ``read`` and write a wav file with ``write``
+//! * Easy and efficient conversion between different types of audio samples.
+//! * Support for the ``ndarray`` crate.
+//!
 //! ## Crate Status
-//! * Still very much in development.
-//! * The API is not stable and is subject to change.
-//! * The API is not fully documented yet.
-//! * The API is not fully tested yet.
-//! * The API is not fully benchmarked yet.
-//! * Targeting a 1.0 release in the next few months.
-//! * 1.0 release will be fully documented, tested and benchmarked. 
-//! * 1.0 release will have a stable API.
-//! * 1.0 release will have the following features:
-//!    * Reading and writing of ``.wav`` files.
-//!    * Conversion between different types of ``.wav`` files.
-//!    * Reading and writing of ``.wav`` files as ``ndarray`` arrays (maybe in parallel in future if it is worth it).
-//!    * Iteration over ``.wav`` files in windows which are lazy loaded (i.e. only loaded into memory when needed).
-//!    * Iteration over each cahnnel of a ``.wav`` file. 
-//! 
-//! ## Crate Feature Flags
-//! The following feature flags are available:
-//! * ``ndarray``: Enables reading and writing of ``.wav`` files as ``ndarray`` arrays by using the ``wavers::IntoArray`` trait.
-//! 
-//! ## Crate Benchmarks
-//! The following benchmarks are available:
-//! * ``wavers::read`` vs ``hound::WavReader``: This benchmark compares the performance of ``wavers::read`` to ``hound::WavReader``. The benchmark is run on both mono and stereo ``.wav`` files. The results are shown below:
-//!     * Mono ``.wav`` file:
+//! * This crate is currently in development. Changes to the core API will either not happen or they will be kept to a minimum. Any planned additions to the API will be built on top of the existing API.
+//! * Documentation is currently in progress, it is mostly complete but will be updated as necessary.
+//! * The API is tested, but there can always be more tests.
+//! * The crate has been benchmarked, but there can always be more benchmarks.
+//! * Some examples of planned features:
+//!     * Support for reading and writing of ``i24`` audio samples.
+//!     * Support iteration over samples in a wav file beyond calling ``iter()`` on the samples. Will providing windowing and other useful features.
+//!     * Investigate the performance of the ``write`` function.
+//!     * Channel wise iteration over samples in a wav file.
+//!     * Resampling algorithms
 //!
-//!     * Stereo ``.wav`` file:
-//! 
+//! ## Examples
+//! The following examples show how to read and write a wav file, as well as retrieving information from the header.
+//!
+//!
+//! ## Reading
+//!
+//! ```no_run
+//! use wavers::{Wav, read};
+//! use std::path::Path;
+//!
+//! fn main() {
+//! 	let fp: &Path = &Path::new("path/to/wav.wav");
+//!
+//! 	// read a wav file as PCM_16 (may perform a conversion)
+//! 	let i16_wav: Wav<i16> = read::<i16>(fp).unwrap();
+//! 	let i16_samples: &[i16] = i16_wav.as_ref();
+//!
+//! 	// Alternatively, may also perform a conversion
+//! 	let f32_wav: Wav<f32> = Wav::<f32>::read(fp).unwrap();
+//! 	let f32_samples: &[f32] = f32_wav.as_ref();
+//! }
+//! ```
+//!
+//! ## Conversion
+//! ```no_run
+//! use wavers::{Wav, read, ConvertTo};
+//! use std::path::Path;
+//!
+//! fn main() {
+//! 	let fp: &Path = &Path::new("path/to/wav.wav");
+//!
+//! 	let i16_wav: Wav<i16> = Wav::<i16>::read(fp).unwrap();
+//! 	// if we already have a wav file that we want to convert.
+//!     // This consumes the original, use as_\<type\> to keep the original.
+//! 	let f32_wav: Wav<f32> = i16_wav.to::<f32>().unwrap();
+//!
+//! 	// We want to open and convert if necessary
+//! 	let f32_wav: Wav<f32> = read::<f32>(fp).unwrap();
+//! }
+//! ```
+//!
+//! ## Writing
+//! ```no_run
+//! use wavers::Wav;
+//! use std::path::Path;
+//!
+//!
+//! fn main() {
+//! 	let fp: &Path = &Path::new("path/to/wav.wav");
+//! 	let out_fp: &Path = &Path::new("out/path/to/wav.wav");
+//!
+//! 	let mut i16_wav: Wav<i16> = Wav::<i16>::read(fp).unwrap();
+//! 	// Some code that modifies the wav data
+//!
+//! 	i16_wav.write(&out_fp).unwrap();
+//! 	// or we can convert and write
+//! 	i16_wav.as_::<f32>().unwrap().write(&out_fp).unwrap();
+//! }
+//!
+//! ```
+//! ## Wav Utilities
+//! ```no_run
+//! use wavers::{WavSpec};
+//! use std::convert::TryFrom;
+//! use std::path::Path;
+//! fn main() {
+//!	   let fp: &Path = &Path::new("path/to/wav.wav");
+//!    // A ``WavSpect`` struct contains the FmtChunk of the file
+//!    // and then calculates the duration in seconds and adds the encoding info.
+//!    let wav_spec: WavSpec = WavSpec::try_from(fp).unwrap();
+//!    let sample_rate = wav_spec.fmt_data.sample_rate;
+//!    let duration = wav_spec.duration;
+//!    let encoding = wav_spec.encoding;
+//! }
+//! ```
+//!
+//! ## Features
+//! The following section describes the features available in the WaveRs crate. Some will modify how WaveRs works internally, such as SIMD and Rayon, whereas the likes of Ndarray provide addtional functionality to you, the user.
+//!
+//! ### Ndarray
+//!
+//! The ``ndarray`` feature is used to provide functions that allow wav files to be read as ``ndarray`` 2-D arrays (samples x channels). There are two functions provided, ``into_ndarray`` and ``as_ndarray``. ``into_ndarray`` consumes the samples and ``as_ndarray`` creates a ``CowArray`` from the samples.
+//!
+//! ```ignore
+//! use wavers::{read, Wav, AsNdarray, IntoNdarray};
+//! use ndarray::{Array2, CowArray2};
+//!
+//! fn main() {
+//! 	let fp: &Path = &Path::new("path/to/wav.wav")
+//! 	let i16_wav: Wav<i16> = read::<i16>(fp).unwrap();
+//! 	let i16_array: Array2<i16> = i16_wav.into_ndarray().unwrap();
+//!
+//! 	let i16_wav: Wav<i16> = read::<i16>(fp).unwrap();
+//! 	let i16_array: CowArray2<i16> = i16_wav.as_ndarray().unwrap();
+//! }
+//!
+//! ```
+//!
+//! ## Benchmarks
+//! To check out the benchmarks head on over to the benchmarks wiki page on the WaveRs <a href=https://github.com/jmg049/wavers/wiki/Benchmarks>GitHub</a>.
+//! Benchmarks were conducted on the reading and writing functionality of WaveRs and compared to the ``hound`` crate.
+//!
 
+mod conversion;
+mod core;
+mod error;
+mod header;
 
-pub mod sample;
-pub mod wave;
-pub mod iter;
+pub use crate::conversion::{AudioSample, ConvertTo};
+pub use crate::core::{read, read_spec, Samples, Wav, WavEncoding, WavSpec};
+pub use crate::header::{read_header, FmtChunk, WavHeader};
 
-pub use sample::{AudioConversion, IterAudioConversion, Sample};
-pub use wave::{read, write, WavFile, SignalInfo, signal_channels, signal_duration, signal_info, signal_sample_rate};
-pub use iter::{WavIterator};
-
-#[cfg(test)]
-mod tests {
-    use approx_eq::assert_approx_eq;
-    use std::{fs::File, io::BufRead, path::Path, str::FromStr};
-
-    use super::*;
-    use crate::{
-        sample::Sample, signal_channels, signal_duration, signal_info, signal_sample_rate,
-        write,
-    };
-
-    #[test]
-    fn can_read_one_channel_i16() {
-        let fp = Path::new("./test_resources/one_channel.wav");
-        let signal = read(fp, Some(Sample::I16(0))).expect("Failed to read wav file");
-
-        let expected_signal =
-            read_text_to_vec::<i16>(Path::new("./test_resources/one_channel_i16.txt"))
-                .expect("Failed to read expected signal")
-                .iter()
-                .map(|s| Sample::I16(*s))
-                .collect::<Vec<Sample>>();
-        for (expected, actual) in std::iter::zip(expected_signal, signal) {
-            assert_eq!(expected, actual);
-        }
-    }
-
-    #[test]
-    fn can_read_two_channel_i16() {
-        let fp = Path::new("./test_resources/two_channel.wav");
-        let signal = read(fp, Some(Sample::I16(0))).expect("Failed to read wav file");
-
-        let expected_signal =
-            read_text_to_vec::<i16>(Path::new("./test_resources/two_channel_i16.txt"))
-                .expect("Failed to read expected signal")
-                .iter()
-                .map(|s| Sample::I16(*s))
-                .collect::<Vec<Sample>>();
-        for (expected, actual) in std::iter::zip(expected_signal, signal) {
-            assert_eq!(expected, actual);
-        }
-    }
-
-    #[test]
-    fn can_read_one_channel_i16_as_f32() {
-        let fp = Path::new("./test_resources/one_channel.wav");
-        let signal = read(fp, Some(Sample::F32(0.0))).expect("Failed to read wav file");
-
-        let expected_signal =
-            read_text_to_vec::<f32>(Path::new("./test_resources/one_channel_f32.txt"))
-                .expect("Failed to read expected signal")
-                .iter()
-                .map(|s| Sample::F32(*s))
-                .collect::<Vec<Sample>>();
-        for (expected, actual) in std::iter::zip(expected_signal, signal) {
-            assert_approx_eq!(expected.as_f64(), actual.as_f64(), 1e-4);
-        }
-    }
-
-    #[test]
-    fn can_read_two_channel_i16_as_f32() {
-        let fp = Path::new("./test_resources/two_channel.wav");
-        let signal = read(fp, Some(Sample::F32(0.0))).expect("Failed to read wav file");
-
-        let expected_signal =
-            read_text_to_vec::<f32>(Path::new("./test_resources/two_channel_f32.txt"))
-                .expect("Failed to read expected signal")
-                .iter()
-                .map(|s| Sample::F32(*s))
-                .collect::<Vec<Sample>>();
-        for (expected, actual) in std::iter::zip(expected_signal, signal) {
-            assert_approx_eq!(expected.as_f64(), actual.as_f64(), 1e-4);
-        }
-    }
-
-    #[test]
-    fn can_write_one_channel_i16() {
-        let fp = Path::new("./test_resources/one_channel.wav");
-        let mut signal = read(fp, Some(Sample::I16(0))).expect("Failed to read wav file");
-        use uuid::Uuid;
-
-        // create tmp_out dir if it doesn't exist
-        let tmp_out_dir = Path::new("./test_resources/tmp_out");
-        if !tmp_out_dir.exists() {
-            std::fs::create_dir(tmp_out_dir).expect("Failed to create tmp_out dir");
-        }
-
-        let id = Uuid::new_v4();
-        let out_id = format!("./test_resources/tmp_out/one_channel_out_{}.wav", id);
-        let mut output_fp = Path::new(&out_id);
-
-        write(&mut output_fp, &mut signal, Some(Sample::I16(0)), 1, 16000)
-            .expect("Failed to write wav file");
-
-        let output_signal =
-            read(output_fp, Some(Sample::I16(0))).expect("Failed to read output wav file");
-        for (expected, actual) in std::iter::zip(signal, output_signal) {
-            assert_eq!(
-                expected, actual,
-                "Expected: {}, Actual: {}",
-                expected, actual
-            );
-        }
-
-        std::fs::remove_file(output_fp).expect("Failed to remove output file");
-    }
-
-    #[test]
-    fn can_write_one_channel_f32() {
-        let fp = Path::new("./test_resources/one_channel.wav");
-        let mut signal = read(fp, Some(Sample::I16(0))).expect("Failed to read wav file");
-
-        use uuid::Uuid;
-
-        // create tmp_out dir if it doesn't exist
-        let tmp_out_dir = Path::new("./test_resources/tmp_out");
-        if !tmp_out_dir.exists() {
-            std::fs::create_dir(tmp_out_dir).expect("Failed to create tmp_out dir");
-        }
-
-        let id = Uuid::new_v4();
-        let out_id = format!("./test_resources/tmp_out/one_channel_out_{}.wav", id);
-        let mut output_fp = Path::new(&out_id);
-        write(
-            &mut output_fp,
-            &mut signal,
-            Some(Sample::F32(0.0)),
-            1,
-            16000,
-        )
-        .expect("Failed to write wav file");
-
-        let output_signal = match read(output_fp, Some(Sample::F32(0.0))) {
-            Ok(s) => s,
-            Err(e) => panic!("Failed to read output wav file: {}", e),
-        };
-        for (expected, actual) in std::iter::zip(signal.as_f32(), output_signal) {
-            assert_approx_eq!(expected.as_f64(), actual.as_f64(), 1e-4);
-        }
-        std::fs::remove_file(output_fp).expect("Failed to remove output file");
-    }
-
-    #[test]
-    fn can_write_two_channel_i16() {
-        let fp = Path::new("./test_resources/two_channel.wav");
-        let mut signal = read(fp, Some(Sample::I16(0))).expect("Failed to read wav file");
-
-        use uuid::Uuid;
-
-        // create tmp_out dir if it doesn't exist
-        let tmp_out_dir = Path::new("./test_resources/tmp_out");
-        if !tmp_out_dir.exists() {
-            std::fs::create_dir(tmp_out_dir).expect("Failed to create tmp_out dir");
-        }
-
-        let id = Uuid::new_v4();
-        let out_id = format!("./test_resources/tmp_out/one_channel_out_{}.wav", id);
-        let mut output_fp = Path::new(&out_id);
-        write(&mut output_fp, &mut signal, Some(Sample::I16(0)), 2, 16000)
-            .expect("Failed to write wav file");
-
-        let output_signal = match read(output_fp, Some(Sample::I16(0))) {
-            Ok(s) => s,
-            Err(e) => panic!("Failed to read output wav file: {}", e),
-        };
-        for (expected, actual) in std::iter::zip(signal, output_signal) {
-            assert_eq!(
-                expected, actual,
-                "Expected: {}, Actual: {}",
-                expected, actual
-            );
-        }
-        std::fs::remove_file(output_fp).expect("Failed to remove output file");
-    }
-
-    #[test]
-    fn can_write_two_channel_f32() {
-        let fp = Path::new("./test_resources/two_channel.wav");
-        let mut signal = read(fp, Some(Sample::I16(0))).expect("Failed to read wav file");
-
-        use uuid::Uuid;
-
-        // create tmp_out dir if it doesn't exist
-        let tmp_out_dir = Path::new("./test_resources/tmp_out");
-        if !tmp_out_dir.exists() {
-            std::fs::create_dir(tmp_out_dir).expect("Failed to create tmp_out dir");
-        }
-
-        let id = Uuid::new_v4();
-        let out_id = format!("./test_resources/tmp_out/one_channel_out_{}.wav", id);
-        let mut output_fp = Path::new(&out_id);
-        write(
-            &mut output_fp,
-            &mut signal,
-            Some(Sample::F32(0.0)),
-            2,
-            16000,
-        )
-        .expect("Failed to write wav file");
-
-        let output_signal = match read(output_fp, Some(Sample::F32(0.0))) {
-            Ok(s) => s,
-            Err(e) => panic!("Failed to read output wav file: {}", e),
-        };
-        for (expected, actual) in std::iter::zip(signal.as_f32(), output_signal) {
-            assert_approx_eq!(expected.as_f64(), actual.as_f64(), 1e-4);
-        }
-        std::fs::remove_file(output_fp).expect("Failed to remove output file");
-    }
-
-    #[test]
-    fn test_signal_duration() {
-        let signal_fp = Path::new("./test_resources/one_channel.wav");
-        let duration = signal_duration(signal_fp).unwrap();
-        assert_eq!(duration, 10);
-    }
-
-    #[test]
-    fn test_signal_duration_invalid_file() {
-        let signal_fp = Path::new("./test_resources/invalid.wav");
-        let duration = signal_duration(signal_fp);
-        assert!(duration.is_err());
-    }
-
-    #[test]
-    fn test_signal_sample_rate() {
-        let signal_fp = Path::new("./test_resources/one_channel.wav");
-        let sample_rate = signal_sample_rate(signal_fp).unwrap();
-        assert_eq!(sample_rate, 16000);
-    }
-
-    #[test]
-    fn test_signal_sample_rate_invalid_file() {
-        let signal_fp = Path::new("./test_resources/invalid.wav");
-        let sample_rate = signal_sample_rate(signal_fp);
-        assert!(sample_rate.is_err());
-    }
-
-    #[test]
-    fn test_n_channels() {
-        let signal_fp = Path::new("./test_resources/one_channel.wav");
-        let n_channels = signal_channels(signal_fp).unwrap();
-        assert_eq!(n_channels, 1);
-
-        let signal_fp = Path::new("./test_resources/two_channel.wav");
-        let n_channels = signal_channels(signal_fp).unwrap();
-        assert_eq!(n_channels, 2);
-    }
-
-    #[test]
-    fn test_n_channels_invalid_file() {
-        let signal_fp = Path::new("./test_resources/invalid.wav");
-        let n_channels = signal_channels(signal_fp);
-        assert!(n_channels.is_err());
-    }
-
-    #[test]
-    fn test_signal_info() {
-        let signal_fp = Path::new("./test_resources/one_channel.wav");
-        let info = signal_info(signal_fp).unwrap();
-        assert_eq!(info.duration, 10);
-        assert_eq!(info.sample_rate, 16000);
-        assert_eq!(info.channels, 1);
-
-        let signal_fp = Path::new("./test_resources/two_channel.wav");
-        let info = signal_info(signal_fp).unwrap();
-        assert_eq!(info.duration, 10);
-        assert_eq!(info.sample_rate, 16000);
-        assert_eq!(info.channels, 2);
-    }
-
-    #[test]
-    fn test_signal_info_invalid_file() {
-        let signal_fp = Path::new("./test_resources/invalid.wav");
-        let info = signal_info(signal_fp);
-        assert!(info.is_err());
-    }
-
-    #[cfg(feature = "ndarray")]
-    use crate::wave::IntoArray;
-
-    #[test]
-    #[cfg(feature = "ndarray")]
-    fn test_signal_to_ndarray_one_channel() {
-        let signal_fp = Path::new("./test_resources/one_channel.wav");
-        let signal: Vec<Sample> = read(signal_fp, Some(Sample::I16(0))).unwrap();
-        let ndarray = signal.clone().into_array(1).unwrap(); // need to clone since normally the into_array function will consume the vector
-        let mut idx = 0;
-        for (expected, actual) in std::iter::zip(signal, ndarray) {
-            assert_eq!(
-                actual, expected,
-                "Expected {} - Actual {}\nFailed at index {}",
-                expected, actual, idx
-            );
-            idx += 1;
-        }
-    }
-
-    #[test]
-    #[cfg(feature = "ndarray")]
-    fn test_signal_to_ndarray_two_channel() {
-        let signal_fp = Path::new("./test_resources/two_channel.wav");
-        let signal: Vec<Sample> = read(signal_fp, Some(Sample::I16(0))).unwrap();
-        let ndarray = signal.clone().into_array(2).unwrap(); // need to clone since normally the into_array function will consume the vector
-        let mut idx = 0;
-        for (expected, actual) in std::iter::zip(signal, ndarray) {
-            assert_eq!(
-                actual, expected,
-                "Expected {} - Actual {}\nFailed at index {}",
-                expected, actual, idx
-            );
-            idx += 1;
-        }
-    }
-
-    fn read_lines<P>(filename: P) -> std::io::Result<std::io::Lines<std::io::BufReader<File>>>
-    where
-        P: AsRef<Path>,
-    {
-        let file = File::open(filename)?;
-        Ok(std::io::BufReader::new(file).lines())
-    }
-
-    fn read_text_to_vec<T: FromStr>(fp: &Path) -> Result<Vec<T>, Box<dyn std::error::Error>>
-    where
-        <T as FromStr>::Err: std::error::Error + 'static,
-    {
-        let mut data = Vec::new();
-        let lines = read_lines(fp)?;
-        for line in lines {
-            let line = line?;
-            for sample in line.split(" ") {
-                let parsed_sample: T = match sample.trim().parse::<T>() {
-                    Ok(num) => num,
-                    Err(err) => {
-                        eprintln!("Failed to parse {}", sample);
-                        panic!("{}", err)
-                    }
-                };
-                data.push(parsed_sample);
-            }
-        }
-        Ok(data)
-    }
-}
+#[cfg(feature = "ndarray")]
+pub use conversion::ndarray_conversion::{AsNdarray, IntoNdarray, IntoWav};

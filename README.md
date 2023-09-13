@@ -37,7 +37,7 @@
     <h3>
         <a href="https://github.com/pdeljanov/Symphonia/blob/master/GETTING_STARTED.md">Getting Started</a>
         <span> · </span>
-        <a href="https://docs.rs/symphonia">Introduction</a>
+        <a href="https://docs.rs/wavers">Introduction</a>
         <span> · </span>
         <a href="">Benchmarks</a>
     </h3>

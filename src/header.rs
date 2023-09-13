@@ -184,11 +184,37 @@ impl Display for ChunkIdentifier {
     }
 }
 
+#[cfg(feature = "pyo3")]
+#[pyclass]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub struct FmtChunk {
+    /// Format of the audio data. 1 for PCM, 3 for IEEE float.
+    #[pyo3(get)]
+    pub format: u16,
+    /// Number of channels in the audio data.
+    #[pyo3(get)]
+    pub channels: u16,
+    /// Sample rate of the audio data.
+    #[pyo3(get)]
+    pub sample_rate: i32,
+    /// Byte rate of the audio data.
+    #[pyo3(get)]
+    pub byte_rate: i32,
+    /// Block align of the audio data.
+    #[pyo3(get)]
+    pub block_align: u16,
+    /// Bits per sample of the audio data.
+    #[pyo3(get)]
+    pub bits_per_sample: u16,
+}
+
 ///
 /// A struct for storing the necessary format information about a wav file.
 ///
 /// In total the struct is 16 bytes
 ///
+#[cfg(not(feature = "pyo3"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub struct FmtChunk {

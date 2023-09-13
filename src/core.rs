@@ -15,6 +15,9 @@ use crate::error::{WaversError, WaversResult};
 use crate::header::{read_header, WavHeader, DATA};
 use crate::FmtChunk;
 
+#[cfg(feature = "pyo3")]
+use pyo3::prelude::*;
+
 pub const I16: TypeId = TypeId::of::<i16>();
 pub const I32: TypeId = TypeId::of::<i32>();
 pub const F32: TypeId = TypeId::of::<f32>();
@@ -67,7 +70,33 @@ where
     Ok(wav)
 }
 
+#[inline(always)]
+pub fn write<T>(fp: &Path, samples: &[T], sample_rate: u32, n_channels: u16) -> WaversResult<()>
+where
+    T: AudioSample + Debug + PartialEq + Copy,
+    i16: ConvertTo<T>,
+    i32: ConvertTo<T>,
+    f32: ConvertTo<T>,
+    f64: ConvertTo<T>,
+{
+    let header = WavHeader::new_header::<T>(sample_rate as i32, n_channels, samples.len())?;
+    let wav = Wav::new(header, Samples::from(samples));
+    wav.write(fp)
+}
+
+#[cfg(feature = "pyo3")]
+#[pyclass]
 /// Small struct that contains the necessary information to determine the exact encoding of a wav file.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct WavEncoding {
+    #[pyo3(get)]
+    format: u16,
+    #[pyo3(get)]
+    bits_per_sample: u16,
+}
+
+/// Small struct that contains the necessary information to determine the exact encoding of a wav file.
+#[cfg(not(feature = "pyo3"))]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct WavEncoding {
     format: u16,
@@ -104,8 +133,21 @@ impl WavEncoding {
     }
 }
 
+#[cfg(feature = "pyo3")]
+#[pyclass]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+pub struct WavSpec {
+    #[pyo3(get)]
+    pub fmt_data: FmtChunk,
+    #[pyo3(get)]
+    pub encoding: WavEncoding,
+    #[pyo3(get)]
+    pub duration: u32,
+}
+
 /// Struct containing information on the specification of the wav file
 /// Avoids having to read the entire file to get the specification.
+#[cfg(not(feature = "pyo3"))]
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct WavSpec {
     pub fmt_data: FmtChunk,
@@ -130,7 +172,16 @@ impl TryFrom<&Path> for WavSpec {
     fn try_from(value: &Path) -> Result<Self, Self::Error> {
         let mut file = File::open(value)?;
         let (header, encoding) = read_header(&mut file)?;
-        let duration = header.get(DATA.into()).unwrap().size / header.fmt_chunk.block_align as u32;
+
+        // self.data_size() as u64
+        //     / (self.sample_rate() * self.channels() as i32 * (self.bits_per_sample() / 8) as i32)
+        //         as u64
+        let data_size = header.get(DATA.into()).unwrap().size;
+        let duration = data_size
+            / (header.fmt_chunk.sample_rate as u32
+                * header.fmt_chunk.channels as u32
+                * (header.fmt_chunk.bits_per_sample / 8) as u32);
+
         Ok(Self {
             fmt_data: header.fmt_chunk,
             encoding,
@@ -788,6 +839,19 @@ mod core_tests {
         for (expected, actual) in expected_samples.iter().zip(wav.samples.iter()) {
             assert_eq!(*expected, *actual, "{} != {}", expected, actual);
         }
+    }
+
+    #[test]
+    fn wav_spec_correct() {
+        let spec = WavSpec::try_from(Path::new(ONE_CHANNEL_WAV_I16)).unwrap();
+        assert_eq!(spec.fmt_data.format, 1);
+        assert_eq!(spec.fmt_data.channels, 1);
+        assert_eq!(spec.fmt_data.sample_rate, 16000);
+        assert_eq!(spec.fmt_data.bits_per_sample, 16);
+        assert_eq!(spec.fmt_data.block_align, 2);
+        assert_eq!(spec.encoding.format, 1);
+        assert_eq!(spec.encoding.bits_per_sample, 16);
+        assert_eq!(spec.duration, 10);
     }
 
     fn read_lines<P>(filename: P) -> std::io::Result<std::io::Lines<std::io::BufReader<File>>>

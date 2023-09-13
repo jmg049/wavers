@@ -131,7 +131,7 @@ mod error;
 mod header;
 
 pub use crate::conversion::{AudioSample, ConvertTo};
-pub use crate::core::{read, read_spec, Samples, Wav, WavEncoding, WavSpec};
+pub use crate::core::{read, read_spec, write, Samples, Wav, WavEncoding, WavSpec};
 pub use crate::header::{read_header, FmtChunk, WavHeader};
 
 #[cfg(feature = "ndarray")]

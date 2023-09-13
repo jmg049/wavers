@@ -9,17 +9,7 @@ readme = "README.md"
 homepage = "https://github.com/jmg049/wavers"
 repository = "https://github.com/jmg049/wavers"
 documentation = "https://docs.rs/wavers"
-keywords = [
-    "wav",
-    "audio",
-    "sound",
-    "music",
-    "wave",
-    "reader",
-    "writer",
-    "decoder",
-    "encoder",
-]
+keywords = ["wav", "audio", "wave", "reader", "writer"]
 categories = ["audio", "encoding", "decoding", "io"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

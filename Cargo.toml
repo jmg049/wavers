@@ -2,6 +2,25 @@
 name = "wavers"
 version = "1.0.0"
 edition = "2021"
+authors = ["Jack Geraghty <jgeraghty049@gmail.com>"]
+license = "MIT"
+description = "A library for reading and writing wav files."
+readme = "README.md"
+homepage = "https://github.com/jmg049/wavers"
+repository = "https://github.com/jmg049/wavers"
+documentation = "https://docs.rs/wavers"
+keywords = [
+    "wav",
+    "audio",
+    "sound",
+    "music",
+    "wave",
+    "reader",
+    "writer",
+    "decoder",
+    "encoder",
+]
+categories = ["audio", "encoding", "decoding", "io"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]

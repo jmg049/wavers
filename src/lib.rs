@@ -1,4 +1,3 @@
-#![feature(const_type_id)]
 //!
 //! # Wavers
 //! WaveRs is a fast and lightweight library for reading and writing ``wav`` files.
@@ -130,9 +129,64 @@ mod core;
 mod error;
 mod header;
 
+use std::fs;
+use std::io::Write;
+use std::path::Path;
+
 pub use crate::conversion::{AudioSample, ConvertTo};
-pub use crate::core::{read, read_spec, write, Samples, Wav, WavEncoding, WavSpec};
+pub use crate::core::ReadSeek;
+pub use crate::core::{Samples, Wav};
+pub use crate::error::WaversResult;
 pub use crate::header::{read_header, FmtChunk, WavHeader};
+
+#[inline(always)]
+pub fn read<T: AudioSample>(data: Box<dyn ReadSeek>) -> WaversResult<Samples<T>>
+where
+    T: ConvertTo<T>,
+    i16: ConvertTo<T>,
+    i32: ConvertTo<T>,
+    f32: ConvertTo<T>,
+    f64: ConvertTo<T>,
+{
+    Wav::<T>::new(data)?.read::<T>()
+}
+
+pub fn read_path<T: AudioSample, P: AsRef<Path>>(path: P) -> WaversResult<Samples<T>>
+where
+    T: ConvertTo<T>,
+    i16: ConvertTo<T>,
+    i32: ConvertTo<T>,
+    f32: ConvertTo<T>,
+    f64: ConvertTo<T>,
+{
+    Wav::<T>::from_path(path)?.read::<T>()
+}
+
+#[inline(always)]
+pub fn write<T: AudioSample, P: AsRef<Path>>(
+    fp: P,
+    samples: &Samples<T>,
+    sample_rate: i32,
+    n_channels: u16,
+) -> WaversResult<()>
+where
+    i16: ConvertTo<T>,
+    i32: ConvertTo<T>,
+    f32: ConvertTo<T>,
+    f64: ConvertTo<T>,
+{
+    let sample_bytes = samples.as_bytes();
+    let header_bytes =
+        WavHeader::new_header::<T>(sample_rate, n_channels, n_channels as usize)?.as_bytes();
+
+    let mut f = fs::File::create(fp)?;
+    f.write_all(&header_bytes)?;
+
+    let data_size_bytes = sample_bytes.len() as u32; // write up to the data size
+    f.write_all(&data_size_bytes.to_ne_bytes())?; // write the data size
+    f.write_all(&sample_bytes)?; // write the data
+    Ok(())
+}
 
 #[cfg(feature = "ndarray")]
 pub use conversion::ndarray_conversion::{AsNdarray, IntoNdarray, IntoWav};

@@ -2,8 +2,8 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hound::WavReader;
 use rand::Rng;
 
-use std::{path::Path, time::Duration};
-use wavers::{read, Wav};
+use std::{fs::File, io::BufReader, path::Path, time::Duration};
+use wavers::{read, read_path, ReadSeek, Wav};
 
 const BENCHMARK_SIZE: usize = 10;
 
@@ -24,12 +24,35 @@ const FILES: [&'static str; BENCHMARK_SIZE] = [
 const ONE_CHANNEL_WAV_I16: &'static str = "./test_resources/one_channel_i16.wav";
 const ONE_CHANNEL_WAV_F32: &'static str = "./test_resources/one_channel_f32.wav";
 
+fn bench_read_samples_full_read(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Reading");
+
+    group.bench_function("Wavers - Full Read", |b| {
+        b.iter(|| {
+            let _: &[i16] = read_path::<i16, &Path>(black_box(Path::new(ONE_CHANNEL_WAV_I16)))
+                .unwrap()
+                .as_ref();
+        })
+    });
+
+    group.bench_function("Wavers - Read all Samples", |b| {
+        b.iter(|| {
+            let f = File::open(Path::new(ONE_CHANNEL_WAV_I16)).unwrap();
+            let buf_reader: Box<dyn ReadSeek> = Box::new(std::io::BufReader::new(f));
+            let mut wav_file = Wav::<i16>::new(buf_reader).unwrap();
+            let _: &[i16] = wav_file.read().unwrap().as_ref();
+        })
+    });
+
+    group.finish();
+}
+
 fn bench_read_one_file(c: &mut Criterion) {
     let mut group = c.benchmark_group("Reading");
 
     group.bench_function("Wavers - Slice - Read I16 as f32", |b| {
         b.iter(|| {
-            let _: &[f32] = read::<f32>(black_box(Path::new(ONE_CHANNEL_WAV_I16)))
+            let _: &[f32] = read_path::<f32, &Path>(black_box(Path::new(ONE_CHANNEL_WAV_I16)))
                 .unwrap()
                 .as_ref();
         })
@@ -37,7 +60,7 @@ fn bench_read_one_file(c: &mut Criterion) {
 
     group.bench_function("Wavers - Slice - Read I16 ", |b| {
         b.iter(|| {
-            let _: &[i16] = read::<i16>(black_box(Path::new(ONE_CHANNEL_WAV_I16)))
+            let _: &[i16] = read_path::<i16, &Path>(black_box(Path::new(ONE_CHANNEL_WAV_I16)))
                 .unwrap()
                 .as_ref();
         })
@@ -47,7 +70,7 @@ fn bench_read_one_file(c: &mut Criterion) {
 fn bench_read_ten_s_i16(c: &mut Criterion) {
     c.bench_function("Read 10s i16 file", |b| {
         b.iter(|| {
-            let _: &[i16] = read::<i16>(black_box(Path::new(ONE_CHANNEL_WAV_I16)))
+            let _: &[i16] = read_path::<i16, &Path>(black_box(Path::new(ONE_CHANNEL_WAV_I16)))
                 .unwrap()
                 .as_ref();
         });
@@ -60,7 +83,9 @@ fn bench_reading(c: &mut Criterion) {
     group.bench_function("Slice - Native i16 - Read", |b| {
         b.iter(|| {
             for file in FILES {
-                let _: &[i16] = read::<i16>(black_box(Path::new(file))).unwrap().as_ref();
+                let _: &[i16] = read_path::<i16, &Path>(black_box(Path::new(file)))
+                    .unwrap()
+                    .as_ref();
             }
         })
     });
@@ -68,7 +93,9 @@ fn bench_reading(c: &mut Criterion) {
     group.bench_function("Slice - Native i16 - Read i16", |b| {
         b.iter(|| {
             for file in FILES {
-                let _: &[i16] = Wav::<i16>::read(black_box(Path::new(file)))
+                let _: &[i16] = Wav::<i16>::from_path(black_box(Path::new(file)))
+                    .unwrap()
+                    .read()
                     .unwrap()
                     .as_ref();
             }
@@ -78,7 +105,9 @@ fn bench_reading(c: &mut Criterion) {
     group.bench_function("Slice - Native i16 As f32", |b| {
         b.iter(|| {
             for file in FILES {
-                let _: &[f32] = read::<f32>(black_box(Path::new(file))).unwrap().as_ref();
+                let _: &[f32] = read_path::<f32, &Path>(black_box(Path::new(file)))
+                    .unwrap()
+                    .as_ref();
             }
         })
     });
@@ -99,9 +128,9 @@ fn bench_writing(c: &mut Criterion) {
     group.bench_function("Slice - Native i16", |b| {
         b.iter(|| {
             for file in FILES {
-                let wav: Wav<i16> = Wav::<i16>::read(black_box(Path::new(file))).unwrap();
+                let mut wav: Wav<i16> = Wav::<i16>::from_path(black_box(Path::new(file))).unwrap();
                 let out = tmp_out.join(Path::new(file).file_name().unwrap());
-                wav.write(black_box(&out)).unwrap();
+                wav.write::<i16, &Path>(black_box(&out)).unwrap();
             }
         })
     });
@@ -109,18 +138,18 @@ fn bench_writing(c: &mut Criterion) {
     group.bench_function("Slice - Native i16 As f32", |b| {
         b.iter(|| {
             for file in FILES {
-                let wav: Wav<i16> = Wav::<i16>::read(black_box(Path::new(file))).unwrap();
+                let mut wav: Wav<f32> = Wav::<f32>::from_path(black_box(Path::new(file))).unwrap();
                 let out = tmp_out.join(Path::new(file).file_name().unwrap());
-                wav.to::<f32>().unwrap().write(black_box(&out)).unwrap();
+                wav.write::<f32, &Path>(black_box(&out)).unwrap();
             }
         })
     });
 
     group.bench_function("Write native f32", |b| {
         b.iter(|| {
-            let wav: Wav<f32> =
-                Wav::<f32>::read(black_box(Path::new(ONE_CHANNEL_WAV_F32))).unwrap();
-            wav.write(Path::new("./test_resources/tmp/one_channel_f32.wav"))
+            let mut wav: Wav<f32> =
+                Wav::<f32>::from_path(black_box(Path::new(ONE_CHANNEL_WAV_F32))).unwrap();
+            wav.write::<f32, &Path>(Path::new("./test_resources/tmp/one_channel_f32.wav"))
                 .unwrap();
         })
     });
@@ -200,7 +229,9 @@ fn bench_wavers_vs_hound_native_i16(c: &mut Criterion) {
     group.bench_function("Wavers - As Slice - i16", |b| {
         b.iter(|| {
             for file in FILES {
-                let _: &[i16] = read::<i16>(black_box(Path::new(file))).unwrap().as_ref();
+                let _: &[i16] = read_path::<i16, &Path>(black_box(Path::new(file)))
+                    .unwrap()
+                    .as_ref();
             }
         })
     });
@@ -215,13 +246,22 @@ fn bench_wavers_vs_hound_native_i16(c: &mut Criterion) {
 // criterion_group!(benches, bench_read_one_file_simd);
 
 // #[cfg(and(not(feature = "ndarray"), not(feature = "simd")))]
+// criterion_group!(
+//     benches,
+//     bench_read_one_file,
+//     bench_read_ten_s_i16,
+//     bench_reading,
+//     bench_writing,
+//     bench_wavers_vs_hound_native_i16
+// );
+
+// criterion_main!(benches);
+
 criterion_group!(
     benches,
-    bench_read_one_file,
-    bench_read_ten_s_i16,
+    bench_read_samples_full_read,
     bench_reading,
     bench_writing,
     bench_wavers_vs_hound_native_i16
 );
-
 criterion_main!(benches);

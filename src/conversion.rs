@@ -1,9 +1,21 @@
+use std::fmt::Debug;
+
 /// Module containing the functionality for converting between the supported audio sample types
 use bytemuck::Pod;
+use num_traits::Num;
 
 /// Trait used to indicate that a type is an audio sample and can be treated as such.
 pub trait AudioSample:
-    Copy + Pod + ConvertTo<i16> + ConvertTo<i32> + ConvertTo<f32> + ConvertTo<f64> + Sync + Send
+    Copy
+    + Pod
+    + Num
+    + ConvertTo<i16>
+    + ConvertTo<i32>
+    + ConvertTo<f32>
+    + ConvertTo<f64>
+    + Sync
+    + Send
+    + Debug
 {
 }
 

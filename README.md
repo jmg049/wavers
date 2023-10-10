@@ -53,17 +53,17 @@ For more details on the project and wav files see the [WaveRs Project](#the-wave
 
 ```rust
 use wavers::{Wav, read};
+use std::path::Path;
 
 fn main() {
-	let fp: &Path = &Path::new("path/to/wav.wav")
-	
-	// read a wav file as PCM_16 (may perform a conversion)
-	let i16_wav: Wav<i16> = read::<i16>(fp).unwrap();
-	let i16_samples: &[i16] = i16_wav.as_ref();
-	
-	// Alternatively, if we know the wav file encoding (we'll assume Float32)
-	let f32_wav: Wav<f32> = Wav::<f32>::read(fp).unwrap();
-	let f32_samples: &[f32] = f32_wav.as_ref();
+	let fp = "path/to/wav.wav";
+    // creates a Wav file struct, does not read the audio data. Just the header information.
+    let wav: Wav<i16> = Wav::from_path(fp).unwrap();
+	let samples: Samples<i16> = wav.read().unwrap();
+    // or to read the audio data directly
+    let (samples, sample_rate): (Samples<i16>, i32) = read::<i16, _>(fp).unwrap();
+    // samples can be derefed to a slice of samples
+    let samples: &[i16] = &samples;
 }
 ```
 
@@ -71,53 +71,57 @@ fn main() {
 ## Conversion
 ```rust
 use wavers::{Wav, read, ConvertTo};
+use std::path::Path;
 
 fn main() {
-	let fp: &Path = &Path::new("path/to/wav.wav")
-	
-	
-	let i16_wav: Wav<i16> = Wav<i16>::read(fp).unwrap();
-	// if we already have a wav file that we want to convert
-	let f32_wav: Wav<f32> = i16_wav.convert();
-	
-	// We want to open and convert if necessary
-	let f32_wav: Wav<f32> = read::<f32>(fp).unwrap(); 
+    // Two ways of converted a wav file
+    let fp: "./path/to/i16_encoded_wav.wav";
+    let wav: Wav<f32> = Wav::from_path(fp).unwrap();
+    // conversion happens automatically when you read
+    let samples: &[f32] = &wav.read().unwrap();
+
+    // or read and then call the convert function on the samples.
+    let (samples, sample_rate): (Samples<i16>, i32) = read::<i16, _>(fp).unwrap();
+    let samples: &[f32] = &samples.convert();
 }
 ```
 
 ## Writing
 ```rust
-use wavers::{Wav, write};
+use wavers::Wav;
+use std::path::Path;
 
 fn main() {
 	let fp: &Path = &Path::new("path/to/wav.wav");
 	let out_fp: &Path = &Path::new("out/path/to/wav.wav");
-	
-	let mut i16_wav: Wav<i16> = Wav<i16>::read(fp).unwrap();
-	// Some code that modifies the wav data
-	
-	i16_wav.write(&out_fp).unwrap();
-	// or we can convert and write
-	i16_wav.write_as::<f32>(&out_fp).unwrap();
+
+	// two main ways, read and write as the type when reading
+    let wav: Wav<i16> = Wav::from_path(fp).unwrap();
+    wav.write(out_fp).unwrap();
+
+	// or read, convert, and write
+    let (samples, sample_rate): (Samples<i16>,i32) = read::<i16, _>(fp).unwrap();
+    let sample_rate = wav.sample_rate();
+    let n_channels = wav.n_channels();
+
+    let samples: &[f32] = &samples.convert();
+    write(out_fp, samples, sample_rate, n_channels).unwrap();
 }
 ```
-
-
 
 ## Wav Utilities
 
 ```rust
-use wavers::{WavSpec};
+use wavers::wav_spec;
 
 fn main() {
-	let fp: &Path = &Path::new("path/to/wav.wav");
-	
-    // A ``WavSpect`` struct contains the FmtChunk of the file and then calculates the duration in seconds and adds the encoding info.
-    let wav_spec: WavSpec = WavSpec::try_from(fp).unwrap();
-
-    let sample_rate = wav_spec.fmt_data.sample_rate;
-    let duration = wav_spec.duration;
-    let encoding = wav_spec.encoding;
+ 	let fp = "path/to/wav.wav";
+    let wav: Wav<i16> = Wav::from_path(fp).unwrap();
+    let sample_rate = wav.sample_rate();
+    let n_channels = wav.n_channels();
+    let duration = wav.duration();
+    let encoding = wav.encoding();
+    let (sample_rate, n_channels, duration, encoing) = wav_spec(fp).unwrap();
 }
 ```
 
@@ -125,25 +129,27 @@ fn main() {
 The following section describes the features available in the WaveRs crate. 
 
 ### Ndarray
-The ``ndarray`` feature is used to provide functions that allow wav files to be read as ``ndarray`` 2-D arrays (samples x channels). There are two functions provided, ``into_ndarray`` and ``as_ndarray``. ``into_ndarray`` consumes the samples and ``as_ndarray`` creates a ``CowArray`` from the samples.
+The ``ndarray`` feature is used to provide functions that allow wav files to be read as ``ndarray`` 2-D arrays (samples x channels). There are two functions provided, ``into_ndarray`` and ``as_ndarray``. Both functions create an ``Array2`` from the samples and return it alongside the sample rate of the audio. ``into_ndarray`` consume the input ``Wav`` struct and ``as_ndarray`` does not.
+
 
 ```rust
 use wavers::{read, Wav, AsNdarray, IntoNdarray};
 use ndarray::{Array2, CowArray2};
 
 fn main() {
-	let fp: &Path = &Path::new("path/to/wav.wav")
-	let i16_wav: Wav<i16> = read::<i16>(fp).unwrap();
-	let i16_array: Array2<i16> = i16_wav.into_ndarray().unwrap();
-	
-	let i16_wav: Wav<i16> = read::<i16>(fp).unwrap();
-	let i16_array: CowArray2<i16> = i16_wav.as_ndarray().unwrap();
-}
+	let fp = "path/to/wav.wav";
+    let wav: Wav<i16> = Wav::from_path(fp).unwrap();
 
+    // does not consume the wav file struct
+	let (i16_array, sample_rate): (Array2<i16>, i32) = wav.as_ndarray().unwrap();
+    
+   	// consumes the wav file struct
+	let (i16_array, sample_rate): (Array2<i16>, i32) = wav.into_ndarray().unwrap();
+}
 ```
 
 ### PyO3
-The ``pyo3`` feature is used to provide interoperabilty with the Python, specifically, the ()[PyWavers] project (Use Wavers in Python).
+The ``pyo3`` feature is used to provide interoperabilty with the Python, specifically, the [PyWavers](https://github.com/jmg049/pywavers) project (Use Wavers in Python).
 
 # The WaveRs Project
 There were several motivating factors when deciding to write Wavers. Firstly, my PhD involves quite a bit of audio processing and I have been working almost exclusively with wav files using Python. Python is a fantastic language but I have always had issues with aspects such as baseline memory usage. Secondly, after being interested in learning a more low-level language and not being bothered with the likes of C/C++ (again), Rust caught my attention. Thirdly, I had to do a Speech and Audio processing module, which involved a project. Mixing all of these together led me to start this project and gave me a deadline and goals for an MVP of Wavers.
@@ -193,5 +199,34 @@ Total bytes = 4 for the chunk name + 4 for the size and then $x$ bytes for the d
 | size | 4 | 4 | The size of the data in bytes |
 | data | $x$ | 8 | The encoded audio data |
 
-
 # Benchmarks
+The benchmarks below were recorded using ``Criterion`` and each benchmark was run on a small dataset of wav files taken from the GenSpeech data set. The durations vary between approx. 7s and 15s and each file is encoded as PCM_16. The results below are the time taken to load all the wav files in the data set. So the time per file is the total time divided by the number of files in the data set. The data set contains 10 files. There are some suspected anomalies in the benchmarks which warrant further investigation. The benchmarks were run on a desktop PC with the following (relevant) specs: 
+
+- CPU: 13th Gen Intel® Core™ i7-13700KF
+- RAM: 32Gb DDR4
+- Storage: 1Tb SSD
+
+
+## Hound vs Wavers - native i16
+| benchmark                    | name       | min_time   | mean_time   | max_time   |
+|:-----------------------------|:-----------|:-----------|:------------|:-----------|
+| Hound vs Wavers - native i16 | Hound Read i16   | 7.4417 ms  | 7.4441 ms   | 7.4466 ms  |
+| Hound vs Wavers - native i16 | Wavers Read i16   | 122.42 µs  | 122.56 µs   | 122.72 µs  |
+| Hound vs Wavers - native i16 | Hound Write i16  | 2.1900 ms  | 2.2506 ms   | 2.3201ms   |
+| Hound vs Wavers - native i16 | Wavers Write i16 | 5.9484 ms  | 6.2091 ms   | 6.5018 ms  |
+
+## Reading
+| benchmark   | name                       | min_time   | mean_time   | max_time   |
+|:------------|:---------------------------|:-----------|:------------|:-----------|
+| Reading     | Native i16 - Read          | 121.28 µs  | 121.36 µs   | 121.44 µs  |
+| Reading     | Native i16 - Read Wav File | 121.56 µs  | 121.79 µs   | 122.08 µs  |
+| Reading     | Native i16 As f32          | 287.63 µs  | 287.78 µs   | 287.97 µs  |
+
+
+## Writing
+| benchmark   | name                      | min_time   | mean_time   | max_time   |
+|:------------|:--------------------------|:-----------|:------------|:-----------|
+| Writing     | Slice - Native i16        | 5.9484 ms  | 6.2091 ms   | 6.5018 ms  |
+| Writing     | Slice - Native i16 As f32 | 30.271 ms  | 33.773 ms   | 37.509 ms  |
+| Writing     | Write native f32          | 11.286 ms  | 11.948 ms   | 12.648 ms  |
+

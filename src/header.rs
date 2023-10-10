@@ -4,45 +4,56 @@
 use std::{
     any::TypeId,
     collections::HashMap,
-    fmt::Display,
-    fs::File,
-    io::{Read, Seek, SeekFrom},
+    fmt::{Debug, Display},
+    io::SeekFrom,
 };
 
 #[cfg(feature = "pyo3")]
 use pyo3::prelude::*;
 
 use crate::{
-    core::WavEncoding,
+    conversion::AudioSample,
+    core::{ReadSeek, WavInfo, WavType},
     error::{WaversError, WaversResult},
-    AudioSample,
 };
 
-pub const RIFF: &[u8; 4] = b"RIFF";
-pub const DATA: &[u8; 4] = b"data";
-pub const WAVE: &[u8; 4] = b"WAVE";
-pub const FMT: &[u8; 4] = b"fmt ";
+const RIFF: [u8; 4] = *b"RIFF";
+pub const DATA: [u8; 4] = *b"data";
+const WAVE: [u8; 4] = *b"WAVE";
+const FMT: [u8; 4] = *b"fmt ";
 
-pub const RIFF_SIZE: usize = 12;
+const RIFF_SIZE: usize = 12;
 const FMT_SIZE: usize = 16;
 
 /// A struct used to store the offset and size of a chunk
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct HeaderEntryInfo {
+pub struct HeaderChunkInfo {
     pub offset: usize,
     pub size: u32,
 }
 
-impl Display for HeaderEntryInfo {
+impl Display for HeaderChunkInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "(offset: {}, size: {})", self.offset, self.size)
     }
 }
 
-impl HeaderEntryInfo {
+impl HeaderChunkInfo {
     /// Constructs a new HeaderEntryInfo struct with a given offset and size.
     pub fn new(offset: usize, size: u32) -> Self {
-        HeaderEntryInfo { offset, size }
+        HeaderChunkInfo { offset, size }
+    }
+}
+
+impl Into<(usize, u32)> for HeaderChunkInfo {
+    fn into(self) -> (usize, u32) {
+        (self.offset, self.size)
+    }
+}
+
+impl Into<(usize, u32)> for &HeaderChunkInfo {
+    fn into(self) -> (usize, u32) {
+        (self.offset, self.size)
     }
 }
 
@@ -50,7 +61,7 @@ impl HeaderEntryInfo {
 #[pyclass]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WavHeader {
-    header_info: HashMap<ChunkIdentifier, HeaderEntryInfo>,
+    header_info: HashMap<ChunkIdentifier, HeaderChunkInfo>,
     pub fmt_chunk: FmtChunk,
     pub current_file_size: usize, // convenience field for keeping track of the current file size
 }
@@ -60,7 +71,7 @@ pub struct WavHeader {
 #[cfg(not(feature = "pyo3"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WavHeader {
-    pub(crate) header_info: HashMap<ChunkIdentifier, HeaderEntryInfo>,
+    pub header_info: HashMap<ChunkIdentifier, HeaderChunkInfo>,
     pub fmt_chunk: FmtChunk,
     pub current_file_size: usize, // convenience field for keeping track of the current file size
 }
@@ -68,15 +79,27 @@ pub struct WavHeader {
 impl WavHeader {
     /// Constructs a new WavHeader struct using the provided header information.
     pub fn new(
-        header_info: HashMap<ChunkIdentifier, HeaderEntryInfo>,
+        header_info: HashMap<ChunkIdentifier, HeaderChunkInfo>,
         fmt_chunk: FmtChunk,
         current_file_size: usize,
     ) -> Self {
+        assert!(
+            header_info.contains_key(&DATA.into()),
+            "Header info must contain a DATA chunk"
+        );
         WavHeader {
             header_info,
             fmt_chunk,
             current_file_size,
         }
+    }
+
+    pub fn data(&self) -> &HeaderChunkInfo {
+        self.header_info.get(&DATA.into()).unwrap() // Safe since a header cannot be created without a DATA chunk
+    }
+
+    pub fn fmt(&self) -> &HeaderChunkInfo {
+        self.header_info.get(&FMT.into()).unwrap() // Safe since a header cannot be created without a FMT chunk
     }
 
     /// Creates a new WavHeader with the given sample rate, number of channels and number of samples.
@@ -85,35 +108,25 @@ impl WavHeader {
     where
         T: AudioSample,
     {
-        let encoding = {
-            if TypeId::of::<T>() == crate::core::I16 || TypeId::of::<T>() == crate::core::I32 {
-                1
-            } else if TypeId::of::<T>() == crate::core::F32 || TypeId::of::<T>() == crate::core::F64
-            {
-                3
-            } else {
-                return Err(WaversError::InvalidType(format!("{:?}", TypeId::of::<T>())));
-            }
-        };
-        let size_t_bytes = std::mem::size_of::<T>();
-        let size_t_bits = size_t_bytes * 8;
-        let fmt_chunk = FmtChunk::new(encoding, n_channels, sample_rate, size_t_bits as u16);
+        let wav_type: WavType = TypeId::of::<T>().try_into()?;
+        let (format, bits_per_sample, _) = wav_type.into();
+
+        let fmt_chunk = FmtChunk::new(format, n_channels, sample_rate, bits_per_sample);
         let mut header_info = HashMap::new();
 
-        let data_size_bytes = n_samples * size_t_bytes;
+        let data_size_bytes = n_samples * (bits_per_sample / 8) as usize;
         let file_size_bytes = data_size_bytes + 44; // 4 bytes for RIFF + 4 bytes for size + 4 bytes for WAVE + 4 bytes for FMT  + 4 bytes for fmt size + 16 bytes for fmt chunk + 4 bytes for DATA + 4 bytes for data size + data_size_bytes
 
-        header_info.insert(RIFF.into(), HeaderEntryInfo::new(0, RIFF_SIZE as u32));
-        // insert WAVE
-        header_info.insert(WAVE.into(), HeaderEntryInfo::new(8, 4));
+        header_info.insert(RIFF.into(), HeaderChunkInfo::new(0, RIFF_SIZE as u32));
         // insert fmt
-        header_info.insert(FMT.into(), HeaderEntryInfo::new(12, FMT_SIZE as u32));
+        header_info.insert(FMT.into(), HeaderChunkInfo::new(12, FMT_SIZE as u32));
         // insert data
         header_info.insert(
             DATA.into(),
-            HeaderEntryInfo::new(36, data_size_bytes as u32),
+            HeaderChunkInfo::new(36, data_size_bytes as u32),
         );
         let current_file_size = file_size_bytes;
+
         Ok(WavHeader {
             header_info,
             fmt_chunk,
@@ -130,24 +143,24 @@ impl WavHeader {
     /// Since the data chunk is not included at this stage, the size is known.
     pub fn as_bytes(&self) -> [u8; 36] {
         let mut bytes = [0; 36]; // 4 bytes for RIFF + 4 bytes for size + 4 bytes for WAVE + 4 bytes for FMT  + 4 bytes for fmt size + 16 bytes for fmt chunk
-        bytes[0..4].copy_from_slice(RIFF);
+        bytes[0..4].copy_from_slice(&RIFF);
         let size = self.file_size() as u32;
         bytes[4..8].copy_from_slice(&size.to_ne_bytes());
-        bytes[8..12].copy_from_slice(WAVE);
-        bytes[12..16].copy_from_slice(FMT);
+        bytes[8..12].copy_from_slice(&WAVE);
+        bytes[12..16].copy_from_slice(&FMT);
         bytes[16..20].copy_from_slice(&(FMT_SIZE as u32).to_ne_bytes());
         let fmt_bytes: [u8; FMT_SIZE] = self.fmt_chunk.into();
         bytes[20..36].copy_from_slice(&fmt_bytes);
         bytes
     }
 
-    pub fn get(&self, chunk_identifier: ChunkIdentifier) -> Option<&HeaderEntryInfo> {
+    pub fn get_chunk(&self, chunk_identifier: ChunkIdentifier) -> Option<&HeaderChunkInfo> {
         self.header_info.get(&chunk_identifier)
     }
 }
 
 /// Wrapper around a 4 byte buffer. Used for storing and displaying/debugging the chunk identifier of a chunk.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct ChunkIdentifier {
     identifier: [u8; 4],
 }
@@ -158,19 +171,15 @@ impl ChunkIdentifier {
     }
 }
 
-impl From<&[u8; 4]> for ChunkIdentifier {
-    fn from(identifier: &[u8; 4]) -> Self {
-        ChunkIdentifier {
-            identifier: *identifier,
-        }
+impl Into<[u8; 4]> for ChunkIdentifier {
+    fn into(self) -> [u8; 4] {
+        self.identifier
     }
 }
 
-impl From<[u8; 4]> for ChunkIdentifier {
-    fn from(identifier: [u8; 4]) -> Self {
-        ChunkIdentifier {
-            identifier: identifier,
-        }
+impl Into<ChunkIdentifier> for [u8; 4] {
+    fn into(self) -> ChunkIdentifier {
+        ChunkIdentifier::new(self)
     }
 }
 
@@ -184,29 +193,14 @@ impl Display for ChunkIdentifier {
     }
 }
 
-#[cfg(feature = "pyo3")]
-#[pyclass]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(C)]
-pub struct FmtChunk {
-    /// Format of the audio data. 1 for PCM, 3 for IEEE float.
-    #[pyo3(get)]
-    pub format: u16,
-    /// Number of channels in the audio data.
-    #[pyo3(get)]
-    pub channels: u16,
-    /// Sample rate of the audio data.
-    #[pyo3(get)]
-    pub sample_rate: i32,
-    /// Byte rate of the audio data.
-    #[pyo3(get)]
-    pub byte_rate: i32,
-    /// Block align of the audio data.
-    #[pyo3(get)]
-    pub block_align: u16,
-    /// Bits per sample of the audio data.
-    #[pyo3(get)]
-    pub bits_per_sample: u16,
+impl Debug for ChunkIdentifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let out_str = match std::str::from_utf8(&self.identifier) {
+            Ok(s) => s,
+            Err(_) => "Invalid identifier",
+        };
+        write!(f, "{}", out_str)
+    }
 }
 
 ///
@@ -232,6 +226,34 @@ pub struct FmtChunk {
     pub bits_per_sample: u16,
 }
 
+/// A struct for storing the necessary format information about a wav file.
+/// This version is compiled when using the pyo3 feature.
+/// In total the struct is 16 bytes
+#[cfg(feature = "pyo3")]
+#[pyclass]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub struct FmtChunk {
+    /// Format of the audio data. 1 for PCM, 3 for IEEE float.
+    #[pyo3(get)]
+    pub format: u16,
+    /// Number of channels in the audio data.
+    #[pyo3(get)]
+    pub channels: u16,
+    /// Sample rate of the audio data.
+    #[pyo3(get)]
+    pub sample_rate: i32,
+    /// Byte rate of the audio data.
+    #[pyo3(get)]
+    pub byte_rate: i32,
+    /// Block align of the audio data.
+    #[pyo3(get)]
+    pub block_align: u16,
+    /// Bits per sample of the audio data.
+    #[pyo3(get)]
+    pub bits_per_sample: u16,
+}
+
 impl FmtChunk {
     /// Constructs a new FmtChunk using the provided format, number of channels, sample rate and bits per sample.
     /// The remaining fields are calculating using these arguments
@@ -247,111 +269,49 @@ impl FmtChunk {
             bits_per_sample,
         }
     }
-}
 
-impl From<[u8; FMT_SIZE]> for FmtChunk {
-    fn from(value: [u8; FMT_SIZE]) -> Self {
-        unsafe { std::mem::transmute_copy::<[u8; FMT_SIZE], Self>(&value) }
+    /// Function to update a WavHeader to a new encoding, for example i16 to f32. Does this in-place.
+    #[inline(always)]
+    pub fn update_fmt_chunk(&mut self, new_type: WavType) -> WaversResult<()> {
+        let current_type = WavType::try_from((self.format, self.bits_per_sample))?;
+
+        if current_type == new_type {
+            return Ok(());
+        }
+
+        let new_type_info: (u16, u16, u16) = new_type.into();
+        let (new_format, new_bits_per_sample, new_block_align) = new_type_info;
+        let new_byte_rate: i32 =
+            self.sample_rate * (self.channels as i32) * (new_block_align as i32);
+
+        self.format = new_format;
+        self.block_align = new_block_align;
+        self.byte_rate = new_byte_rate;
+        self.bits_per_sample = new_bits_per_sample;
+        Ok(())
     }
 }
 
 impl Into<[u8; FMT_SIZE]> for FmtChunk {
     fn into(self) -> [u8; FMT_SIZE] {
-        unsafe { std::mem::transmute_copy::<Self, [u8; FMT_SIZE]>(&self) }
+        unsafe { std::mem::transmute_copy::<FmtChunk, [u8; FMT_SIZE]>(&self) }
     }
 }
 
-impl FmtChunk {
-    /// Function to update a WavHeader to a new encoding, for example i16 to f32. Does this in-place.
-    #[inline(always)]
-    pub fn update_header(&mut self, new_type_id: TypeId) -> WaversResult<()> {
-        let current_type = match (self.format, self.block_align) {
-            (1, 2) => crate::core::I16,
-            (1, 4) => crate::core::I32,
-            (3, 4) => crate::core::F32,
-            (3, 8) => crate::core::F64,
-            _ => {
-                return Err(WaversError::InvalidType(format!(
-                    "Unsupported format {:?}",
-                    new_type_id
-                )))
-            }
-        };
-
-        if current_type == new_type_id {
-            return Ok(());
-        }
-
-        // if statement since std::any::TypeId does not implement PartialEq
-        let new_format = {
-            if new_type_id == crate::core::I16 {
-                1
-            } else if new_type_id == crate::core::I32 {
-                1
-            } else if new_type_id == crate::core::F32 {
-                3
-            } else if new_type_id == crate::core::F64 {
-                3
-            } else {
-                return Err(WaversError::InvalidType(format!(
-                    "Unsupported format {:?}",
-                    new_type_id
-                )));
-            }
-        };
-
-        let new_block_align = {
-            if new_type_id == crate::core::I16 {
-                2
-            } else if new_type_id == crate::core::I32 {
-                4
-            } else if new_type_id == crate::core::F32 {
-                4
-            } else if new_type_id == crate::core::F64 {
-                8
-            } else {
-                return Err(WaversError::InvalidType(format!(
-                    "Unsupported format {:?}",
-                    new_type_id
-                )));
-            }
-        };
-
-        let new_byte_rate: i32 =
-            self.sample_rate * (self.channels as i32) * (new_block_align as i32);
-
-        let new_bits_per_samples = {
-            if new_type_id == crate::core::I16 {
-                16
-            } else if new_type_id == crate::core::I32 {
-                32
-            } else if new_type_id == crate::core::F32 {
-                32
-            } else if new_type_id == crate::core::F64 {
-                64
-            } else {
-                return Err(WaversError::InvalidType(format!(
-                    "Unsupported format {:?}",
-                    new_type_id
-                )));
-            }
-        };
-
-        self.format = new_format;
-        self.block_align = new_block_align;
-        self.byte_rate = new_byte_rate;
-        self.bits_per_sample = new_bits_per_samples;
-        Ok(())
+impl Into<FmtChunk> for [u8; FMT_SIZE] {
+    fn into(self) -> FmtChunk {
+        unsafe { std::mem::transmute_copy::<[u8; FMT_SIZE], FmtChunk>(&self) }
     }
 }
 
 /// Reads the header of a wav file and returns a tuple containing the header information and the wav encoding.
 /// Mostly for convenience, but can also be used to inspect a wav file without reading the data.
-pub fn read_header(file: &mut File) -> WaversResult<(WavHeader, WavEncoding)> {
+pub(crate) fn read_header(readable: &mut Box<dyn ReadSeek>) -> WaversResult<WavInfo> {
     // reset the buffer reader to the start of the file
-    file.seek(SeekFrom::Start(0))?;
+    readable.seek(SeekFrom::Start(0))?;
 
-    let header_info: HashMap<ChunkIdentifier, HeaderEntryInfo> = discover_all_header_chunks(file)?;
+    let header_info: HashMap<ChunkIdentifier, HeaderChunkInfo> =
+        discover_all_header_chunks(readable)?;
 
     match header_info.contains_key(&FMT.into()) {
         true => (),
@@ -364,35 +324,39 @@ pub fn read_header(file: &mut File) -> WaversResult<(WavHeader, WavEncoding)> {
     }
 
     let fmt_entry = header_info.get(&FMT.into()).unwrap(); // Safe since we just checked that the key exists
-    file.seek(SeekFrom::Start(fmt_entry.offset as u64))?; // +4 to move to beyond the chunk identifier
+    readable.seek(SeekFrom::Start(fmt_entry.offset as u64))?; // +4 to move to beyond the chunk identifier
 
     let mut fmt_buf: [u8; FMT_SIZE] = [0; FMT_SIZE as usize];
-    file.read_exact(&mut fmt_buf)?;
-    let fmt_chunk: FmtChunk = FmtChunk::from(fmt_buf);
+    readable.read_exact(&mut fmt_buf)?;
+    let fmt_chunk: FmtChunk = fmt_buf.into();
 
-    let wav_encoding = crate::core::WavEncoding::new(fmt_chunk.format, fmt_chunk.bits_per_sample);
+    let wav_type = crate::core::WavType::try_from((fmt_chunk.format, fmt_chunk.bits_per_sample))?;
+
     let total_size_in_bytes = header_info
         .get(&DATA.into())
         .expect("File does not contain a data chunk")
         .size
         + 44; // 44 bytes for the header
-    let header = WavHeader::new(header_info, fmt_chunk, total_size_in_bytes as usize);
+    let wav_header = WavHeader::new(header_info, fmt_chunk, total_size_in_bytes as usize);
 
-    Ok((header, wav_encoding))
+    Ok(WavInfo {
+        wav_type,
+        wav_header,
+    })
 }
 
 // This shouldn't cause too many performance issues. Would wager than there is only ever the core header chunks and maybe a handful more.
 // Each iteration is simply just a read of 8 (4+4) bytes.
 fn discover_all_header_chunks(
-    buf_reader: &mut File,
-) -> WaversResult<HashMap<ChunkIdentifier, HeaderEntryInfo>> {
-    let mut entries: HashMap<ChunkIdentifier, HeaderEntryInfo> = HashMap::new();
+    reader: &mut Box<dyn ReadSeek>,
+) -> WaversResult<HashMap<ChunkIdentifier, HeaderChunkInfo>> {
+    let mut entries: HashMap<ChunkIdentifier, HeaderChunkInfo> = HashMap::new();
 
     // create a reusable buffer for reading header chunks
     let mut buf: [u8; 4] = [0; 4];
     // The first 4 bytes of the file should be the RIFF chunk
-    buf_reader.read_exact(&mut buf)?;
-    match buf_eq(RIFF, &buf) {
+    reader.read_exact(&mut buf)?;
+    match buf_eq(&RIFF, &buf) {
         true => (),
         false => {
             return Err(WaversError::from(std::io::Error::new(
@@ -402,27 +366,27 @@ fn discover_all_header_chunks(
         }
     }
 
-    buf_reader.read_exact(&mut buf)?; // read the next 4 bytes which should be the size of the file
+    reader.read_exact(&mut buf)?; // read the next 4 bytes which should be the size of the file
 
-    entries.insert(RIFF.into(), HeaderEntryInfo::new(0, RIFF_SIZE as u32));
+    entries.insert(RIFF.into(), HeaderChunkInfo::new(0, RIFF_SIZE as u32));
 
     // The next 4 bytes should be the WAVE chunk
-    buf_reader.read_exact(&mut buf)?;
+    reader.read_exact(&mut buf)?;
     let _: ChunkIdentifier = buf.into();
 
-    while let Ok(_) = buf_reader.read_exact(&mut buf) {
+    while let Ok(_) = reader.read_exact(&mut buf) {
         let chunk_identifier: ChunkIdentifier = buf.into();
 
-        buf_reader.read_exact(&mut buf)?;
+        reader.read_exact(&mut buf)?;
         let chunk_size: u32 =
             buf[0] as u32 | (buf[1] as u32) << 8 | (buf[2] as u32) << 16 | (buf[3] as u32) << 24;
 
         entries.insert(
             chunk_identifier,
-            HeaderEntryInfo::new(buf_reader.stream_position()? as usize, chunk_size),
+            HeaderChunkInfo::new(reader.stream_position()? as usize, chunk_size),
         );
 
-        buf_reader.seek(SeekFrom::Current(chunk_size as i64))?;
+        reader.seek(SeekFrom::Current(chunk_size as i64))?;
     }
 
     Ok(entries)
@@ -437,6 +401,7 @@ fn buf_eq(buf: &[u8; 4], chunk_id: &[u8; 4]) -> bool {
 mod header_tests {
     use super::*;
     use crate::FmtChunk;
+    use std::fs::File;
 
     const TEST_FILE: &str = "./test_resources/one_channel_i16.wav";
 
@@ -451,21 +416,26 @@ mod header_tests {
 
     #[test]
     fn can_read_header() {
-        let mut file = File::open(TEST_FILE).unwrap();
-        let (header, _) = read_header(&mut file).expect("Failed to read header");
+        let file = File::open(TEST_FILE).unwrap();
+        let mut file = Box::new(file) as Box<dyn ReadSeek>;
+        let wav_info = read_header(&mut file).expect("Failed to read header");
         assert_eq!(
-            header.fmt_chunk, ONE_CHANNEL_FMT_CHUNK,
+            wav_info.wav_header.fmt_chunk, ONE_CHANNEL_FMT_CHUNK,
             "Fmt chunk does not match"
         );
     }
 
     #[test]
     fn can_convert_to_and_from_bytes() {
-        let mut file = File::open(TEST_FILE).unwrap();
-        let (header, _) = read_header(&mut file).expect("Failed to read header");
-        let fmt_bytes: [u8; FMT_SIZE] = header.fmt_chunk.into();
+        let file = File::open(TEST_FILE).unwrap();
+        let mut file = Box::new(file) as Box<dyn ReadSeek>;
+        let wav_info = read_header(&mut file).expect("Failed to read header");
+        let fmt_bytes: [u8; FMT_SIZE] = wav_info.wav_header.fmt_chunk.into();
 
-        let new_fmt = FmtChunk::from(fmt_bytes);
-        assert_eq!(header.fmt_chunk, new_fmt, "Fmt chunk does not match");
+        let new_fmt = fmt_bytes.into();
+        assert_eq!(
+            wav_info.wav_header.fmt_chunk, new_fmt,
+            "Fmt chunk does not match"
+        );
     }
 }

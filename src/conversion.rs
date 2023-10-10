@@ -1,9 +1,23 @@
+use std::fmt::Debug;
+
 /// Module containing the functionality for converting between the supported audio sample types
 use bytemuck::Pod;
+use num_traits::Num;
+
+use crate::core::alloc_sample_buffer;
 
 /// Trait used to indicate that a type is an audio sample and can be treated as such.
 pub trait AudioSample:
-    Copy + Pod + ConvertTo<i16> + ConvertTo<i32> + ConvertTo<f32> + ConvertTo<f64> + Sync + Send
+    Copy
+    + Pod
+    + Num
+    + ConvertTo<i16>
+    + ConvertTo<i32>
+    + ConvertTo<f32>
+    + ConvertTo<f64>
+    + Sync
+    + Send
+    + Debug
 {
 }
 
@@ -14,11 +28,29 @@ impl AudioSample for f64 {}
 
 /// Trait for converting between audio sample types
 /// The type ``T`` must implement the ``AudioSample`` trait
-pub trait ConvertTo<T>
+pub trait ConvertTo<T: AudioSample> {
+    fn convert_to(&self) -> T
+    where
+        Self: Sized + AudioSample;
+}
+
+/// Trait for converting between audio sample types in a slice
+/// The type ``T`` must implement the ``AudioSample`` trait
+pub trait ConvertSlice<T: AudioSample> {
+    fn convert_slice(self) -> Box<[T]>;
+}
+
+impl<T: AudioSample, F> ConvertSlice<T> for Box<[F]>
 where
-    for<'a> T: 'a + AudioSample,
+    F: AudioSample + ConvertTo<T>,
 {
-    fn convert_to(&self) -> T;
+    fn convert_slice(self) -> Box<[T]> {
+        let mut out: Box<[T]> = alloc_sample_buffer(self.len());
+        for i in 0..self.len() {
+            out[i] = self[i].convert_to();
+        }
+        out
+    }
 }
 
 impl ConvertTo<i16> for i16 {
@@ -160,6 +192,24 @@ mod conversion_tests {
     }
 
     #[test]
+    fn i16_to_f32_slice() {
+        let i16_samples: Vec<i16> =
+            read_text_to_vec(Path::new("./test_resources/one_channel_i16.txt")).unwrap();
+        let i16_samples: Box<[i16]> = i16_samples.into_boxed_slice();
+        let f32_samples: Vec<f32> =
+            read_text_to_vec(Path::new("./test_resources/one_channel_f32.txt")).unwrap();
+
+        let f32_samples: &[f32] = &f32_samples;
+        let converted_i16_samples: Box<[f32]> = i16_samples.convert_slice();
+
+        for (_, (expected_sample, actual_sample)) in
+            converted_i16_samples.iter().zip(f32_samples).enumerate()
+        {
+            assert_approx_eq!(*expected_sample as f64, *actual_sample as f64, 1e-4);
+        }
+    }
+
+    #[test]
     fn f32_to_i16() {
         let i16_samples: Vec<i16> =
             read_text_to_vec(Path::new("./test_resources/one_channel_i16.txt")).unwrap();
@@ -167,6 +217,7 @@ mod conversion_tests {
 
         let f32_samples: Vec<f32> =
             read_text_to_vec(Path::new("./test_resources/one_channel_f32.txt")).unwrap();
+
         let f32_samples: &[f32] = &f32_samples;
         for (expected_sample, actual_sample) in i16_samples.iter().zip(f32_samples) {
             let converted_sample: i16 = actual_sample.convert_to();
@@ -212,21 +263,13 @@ mod conversion_tests {
 }
 
 #[cfg(feature = "ndarray")]
-pub mod ndarray_conversion {
-    use crate::{conversion::AudioSample, error::WaversResult};
-    use ndarray::{Array2, CowArray, Ix2, ShapeError};
-    pub trait IntoNdarray {
-        type Target: AudioSample;
-        fn into_ndarray(self) -> Result<Array2<Self::Target>, ShapeError>;
-    }
+pub trait IntoNdarray {
+    type Target: AudioSample;
+    fn into_ndarray(self) -> crate::WaversResult<(ndarray::Array2<Self::Target>, i32)>;
+}
 
-    pub trait AsNdarray {
-        type Target: AudioSample;
-        fn as_ndarray(&self) -> Result<CowArray<Self::Target, Ix2>, ShapeError>;
-    }
-
-    pub trait IntoWav {
-        type Target: AudioSample;
-        fn into(self, sample_rate: i32) -> WaversResult<crate::core::Wav<Self::Target>>;
-    }
+#[cfg(feature = "ndarray")]
+pub trait AsNdarray {
+    type Target: AudioSample;
+    fn as_ndarray(&mut self) -> crate::WaversResult<(ndarray::Array2<Self::Target>, i32)>;
 }

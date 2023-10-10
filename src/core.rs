@@ -1,442 +1,412 @@
 /// Module contains the core structs, ``Wav`` and ``Samples`` for working working with wav files.
 use std::alloc::Layout;
 use std::any::TypeId;
-
 use std::fmt::{Debug, Display};
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
 
 use bytemuck::cast_slice;
 
+#[cfg(feature = "ndarray")]
+use ndarray::{Array, Array2};
+
+use crate::conversion::ConvertSlice;
+
 use crate::conversion::{AudioSample, ConvertTo};
 use crate::error::{WaversError, WaversResult};
 use crate::header::{read_header, WavHeader, DATA};
-use crate::FmtChunk;
 
 #[cfg(feature = "pyo3")]
 use pyo3::prelude::*;
 
-pub const I16: TypeId = TypeId::of::<i16>();
-pub const I32: TypeId = TypeId::of::<i32>();
-pub const F32: TypeId = TypeId::of::<f32>();
-pub const F64: TypeId = TypeId::of::<f64>();
+/// Trait representing a type that can be used to read and seek.
+pub trait ReadSeek: Read + Seek {}
 
-/// Function to read a wav file from a given Path. The function will attempt to read the file and will convert the data to the specified type if necessary.
+impl ReadSeek for std::fs::File {}
+impl<T: ReadSeek> ReadSeek for std::io::BufReader<T> {}
+
+/// Struct representing a wav file.
+/// The struct contains a boxed reader and the header information of the wav file.
 ///
-/// # Examples
-/// ```no_run
-/// use wavers::read;
-/// use std::path::Path;
-///
-/// fn main() -> Result<(), Box<dyn std::error::Error>> {
-///    let fp: &Path = &Path::new("path/to/some/wav.wav");
-///    let wav_i16 = read::<i16>(fp)?; // read a file as i16
-///    let wav_f32 = read::<f32>(fp)?; // read a file as f32
-///    Ok(())
-/// }
-/// ```
-#[inline(always)]
-pub fn read<T>(fp: &Path) -> WaversResult<Wav<T>>
+/// The boxed reader can be any type that implements the ``ReadSeek`` trait and is used to read the audio samples from the wav file when desired.
+/// The header information is available after instantiating the struct and can be used to inspect the wav file.
+pub struct Wav<T: AudioSample>
 where
-    T: AudioSample + Debug + PartialEq,
     i16: ConvertTo<T>,
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
+    Box<[i16]>: ConvertSlice<T>,
+    Box<[i32]>: ConvertSlice<T>,
+    Box<[f32]>: ConvertSlice<T>,
+    Box<[f64]>: ConvertSlice<T>,
 {
-    let mut file = File::open(fp)?;
-    let (header, encoding) = read_header(&mut file)?;
-    let file_encoding: TypeId = encoding.try_into()?;
-    let target_encoding: TypeId = TypeId::of::<T>();
-
-    let wav: Wav<T> = match file_encoding == target_encoding {
-        true => Wav::<T>::from_file_and_header(&mut file, header)?,
-        false => {
-            if file_encoding == I16 {
-                Wav::<i16>::from_file_and_header(&mut file, header)?.to::<T>()?
-            } else if file_encoding == I32 {
-                Wav::<i32>::from_file_and_header(&mut file, header)?.to::<T>()?
-            } else if file_encoding == F32 {
-                Wav::<f32>::from_file_and_header(&mut file, header)?.to::<T>()?
-            } else if file_encoding == F64 {
-                Wav::<f64>::from_file_and_header(&mut file, header)?.to::<T>()?
-            } else {
-                return Err(WaversError::InvalidType(format!("{:?}", file_encoding)));
-            }
-        }
-    };
-    Ok(wav)
+    _phantom: std::marker::PhantomData<T>,
+    reader: Box<dyn ReadSeek>,
+    pub wav_info: WavInfo,
 }
 
-#[inline(always)]
-pub fn write<T>(fp: &Path, samples: &[T], sample_rate: u32, n_channels: u16) -> WaversResult<()>
+impl<T: AudioSample> Wav<T>
 where
-    T: AudioSample + Debug + PartialEq + Copy,
     i16: ConvertTo<T>,
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
+    Box<[i16]>: ConvertSlice<T>,
+    Box<[i32]>: ConvertSlice<T>,
+    Box<[f32]>: ConvertSlice<T>,
+    Box<[f64]>: ConvertSlice<T>,
 {
-    let header = WavHeader::new_header::<T>(sample_rate as i32, n_channels, samples.len())?;
-    let wav = Wav::new(header, Samples::from(samples));
-    wav.write(fp)
-}
+    /// Construct a new Wav struct from a boxed reader.
+    pub fn new(mut reader: Box<dyn ReadSeek>) -> WaversResult<Self> {
+        let wav_info = read_header(&mut reader)?;
 
-#[cfg(feature = "pyo3")]
-#[pyclass]
-/// Small struct that contains the necessary information to determine the exact encoding of a wav file.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct WavEncoding {
-    #[pyo3(get)]
-    format: u16,
-    #[pyo3(get)]
-    bits_per_sample: u16,
-}
+        let (data_offset, _) = wav_info.wav_header.data().into();
 
-/// Small struct that contains the necessary information to determine the exact encoding of a wav file.
-#[cfg(not(feature = "pyo3"))]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct WavEncoding {
-    format: u16,
-    bits_per_sample: u16,
-}
-
-impl TryInto<TypeId> for WavEncoding {
-    type Error = WaversError;
-
-    fn try_into(self) -> Result<TypeId, Self::Error> {
-        match (self.format, self.bits_per_sample) {
-            (1, 16) => Ok(I16),
-            (1, 32) => Ok(I32),
-            (3, 32) => Ok(F32),
-            (3, 64) => Ok(F64),
-            _ => Err(WaversError::InvalidType(
-                format!(
-                    "format: {}, bits_per_sample: {}",
-                    self.format, self.bits_per_sample
-                )
-                .into(),
-            )),
-        }
-    }
-}
-
-impl WavEncoding {
-    /// Constructs a new WavEncoding struct
-    pub fn new(format: u16, bits_per_sample: u16) -> Self {
-        Self {
-            format,
-            bits_per_sample,
-        }
-    }
-}
-
-#[cfg(feature = "pyo3")]
-#[pyclass]
-#[derive(Debug, Clone, PartialEq, Eq, Copy)]
-pub struct WavSpec {
-    #[pyo3(get)]
-    pub fmt_data: FmtChunk,
-    #[pyo3(get)]
-    pub encoding: WavEncoding,
-    #[pyo3(get)]
-    pub duration: u32,
-}
-
-/// Struct containing information on the specification of the wav file
-/// Avoids having to read the entire file to get the specification.
-#[cfg(not(feature = "pyo3"))]
-#[derive(Debug, Clone, PartialEq, Eq, Copy)]
-pub struct WavSpec {
-    pub fmt_data: FmtChunk,
-    pub encoding: WavEncoding,
-    pub duration: u32,
-}
-
-impl WavSpec {
-    pub fn new(fmt_data: FmtChunk, duration: u32) -> Self {
-        let encoding = WavEncoding::new(fmt_data.format, fmt_data.bits_per_sample);
-        Self {
-            fmt_data,
-            encoding,
-            duration,
-        }
-    }
-}
-
-impl TryFrom<&Path> for WavSpec {
-    type Error = WaversError;
-
-    fn try_from(value: &Path) -> Result<Self, Self::Error> {
-        let mut file = File::open(value)?;
-        let (header, encoding) = read_header(&mut file)?;
-
-        // self.data_size() as u64
-        //     / (self.sample_rate() * self.channels() as i32 * (self.bits_per_sample() / 8) as i32)
-        //         as u64
-        let data_size = header.get(DATA.into()).unwrap().size;
-        let duration = data_size
-            / (header.fmt_chunk.sample_rate as u32
-                * header.fmt_chunk.channels as u32
-                * (header.fmt_chunk.bits_per_sample / 8) as u32);
+        reader.seek(SeekFrom::Start(data_offset as u64))?;
+        let (_, _, _n_bytes) = wav_info.wav_type.into();
 
         Ok(Self {
-            fmt_data: header.fmt_chunk,
-            encoding,
-            duration,
+            _phantom: std::marker::PhantomData,
+            reader,
+            wav_info,
         })
     }
-}
 
-/// Read the specification of a wav file. This includes the format information, duration and encoding.
-pub fn read_spec(fp: &Path) -> WaversResult<WavSpec> {
-    WavSpec::try_from(fp)
-}
-
-/// Struct representing an entire wav file. It contains the header information and the samples.
-/// This is the priamry struct in the Wavers library.
-///
-/// Currently supports i16, i32, f32, and f64 samples.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Wav<T>
-where
-    for<'a> T: 'a + AudioSample,
-{
-    pub header: WavHeader,
-    pub samples: Samples<T>,
-}
-
-impl Wav<i16> {}
-impl Wav<i32> {}
-impl Wav<f32> {}
-impl Wav<f64> {}
-
-impl<T> Wav<T>
-where
-    for<'a> T: 'a + AudioSample + Debug + PartialEq + Copy,
-    i16: ConvertTo<T>,
-    i32: ConvertTo<T>,
-    f32: ConvertTo<T>,
-    f64: ConvertTo<T>,
-{
-    /// Constructs a new Wav struct from a WavHeader and Samples
-    pub fn new(header: WavHeader, samples: Samples<T>) -> Self {
-        Wav { header, samples }
+    /// Construct a new Wav struct from a path.
+    /// Uses a BufReader to read the file.
+    pub fn from_path<P: AsRef<Path>>(path: P) -> WaversResult<Self> {
+        let f = std::fs::File::open(path)?;
+        let buf_reader: Box<dyn ReadSeek> = Box::new(std::io::BufReader::new(f));
+        Self::new(buf_reader)
     }
 
-    /// Constructs a new Wav struct from a file and a header (also from the file).
-    fn from_file_and_header(file: &mut File, header: WavHeader) -> WaversResult<Wav<T>> {
-        let (data_offset, data_size_bytes) = match header.get(DATA.into()) {
-            Some(e) => (e.offset, e.size),
-            None => {
-                return Err(WaversError::from(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "No data chunk found",
-                )));
+    /// Read the audio samples from the wav file.
+    /// The function will read all the samples remaining. If data has already been read using read_samples, this function will only read the remaining samples.
+    ///
+    /// Resets the reader to the start of the data chunk after it has finished reading.
+    ///
+    /// Returns a ``WaversResult`` containing a ``Samples`` struct or an error.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use wavers::Wav;
+    ///
+    /// fn main() {
+    ///     let wav: Wav<i16> = Wav::from_path("path/to/wav.wav").unwrap();
+    ///     let samples: &[i16] = &wav.read().unwrap();
+    /// }
+    ///
+    #[inline(always)]
+    pub fn read(&mut self) -> WaversResult<Samples<T>> {
+        let (data_offset, data_size_bytes) = self.header().data().into();
+        let native_type = self.wav_info.wav_type;
+        let native_size_bytes: usize = native_type.into();
+        let number_of_samples_already_read = (self.reader.seek(SeekFrom::Current(0))?
+            - data_offset as u64)
+            / native_size_bytes as u64;
+
+        let n_samples = data_size_bytes as usize / native_size_bytes;
+        let samples = self.read_samples(n_samples - number_of_samples_already_read as usize)?;
+        self.reader.seek(SeekFrom::Start(data_offset as u64))?;
+
+        Ok(samples)
+    }
+
+    /// Read n_samples from the wav file.
+    /// The function will read n_samples from the current position in the file.
+    ///
+    /// Reading can later be resumed.
+    ///
+    /// Returns a ``WaversResult`` containing a ``Samples`` struct or an error.
+    #[inline(always)]
+    pub fn read_samples(&mut self, n_samples: usize) -> WaversResult<Samples<T>> {
+        let native_type = self.wav_info.wav_type;
+        let native_size_bytes: usize = native_type.into();
+        let n_native_bytes: usize = n_samples * native_size_bytes;
+        // let n_bytes = n_samples * std::mem::size_of::<T>();
+
+        let mut samples = alloc_box_buffer(n_native_bytes);
+        self.reader.read_exact(&mut samples)?;
+
+        let wav_type_from_file = self.wav_info.wav_type;
+
+        let desired_type: WavType = TypeId::of::<T>().try_into()?;
+        if wav_type_from_file == desired_type {
+            return Ok(Samples::from(cast_slice::<u8, T>(&samples)));
+        }
+
+        match wav_type_from_file {
+            WavType::Pcm16 => {
+                let samples: &[i16] = cast_slice::<u8, i16>(&samples);
+                Ok(Samples::from(samples).convert())
             }
-        };
-
-        let mut raw_samples: Box<[u8]> = alloc_box_buffer(data_size_bytes as usize);
-        file.seek(SeekFrom::Start(data_offset as u64))?; // seek to data chunk
-        file.read_exact(&mut raw_samples)?; // read data chunk into buffer
-
-        let samples: Samples<T> = Samples::from(raw_samples.as_ref());
-        Ok(Wav { header, samples })
+            WavType::Pcm32 => {
+                let samples: &[i32] = cast_slice::<u8, i32>(&samples);
+                Ok(Samples::from(samples).convert())
+            }
+            WavType::Float32 => {
+                let samples: &[f32] = cast_slice::<u8, f32>(&samples);
+                Ok(Samples::from(samples).convert())
+            }
+            WavType::Float64 => {
+                let samples: &[f64] = cast_slice::<u8, f64>(&samples);
+                Ok(Samples::from(samples).convert())
+            }
+        }
     }
 
-    /// Public function to read a wav file from a given Path. The function will attempt to read the file and will convert the data to the associated type ``T ``of the Wav struct.
-    /// The header and data are read immediately.
-    pub fn read(fp: &Path) -> WaversResult<Self> {
-        let mut file = File::open(fp)?;
-        let (header, _encoding) = read_header(&mut file)?;
-        Self::from_file_and_header(&mut file, header)
-    }
+    #[inline(always)]
+    pub fn write<F: AudioSample, P: AsRef<Path>>(&mut self, p: P) -> WaversResult<()>
+    where
+        T: ConvertTo<F>,
+        Box<[T]>: ConvertSlice<F>,
+    {
+        let samples = self.read()?.convert::<F>();
+        let sample_bytes = samples.as_bytes();
+        let fmt_chunk = self.wav_info.wav_header.fmt_chunk;
+        self.wav_info.wav_header =
+            WavHeader::new_header::<F>(fmt_chunk.sample_rate, fmt_chunk.channels, samples.len())?;
 
-    /// Public function to write a wav file to the fiven file path.
-    /// The function writes the data as is, if you want to write as different type call either to::\<type\> or as_::\<type\> before calling write.
-    pub fn write<F: AsRef<Path>>(&self, fp: F) -> WaversResult<()> {
-        let mut file = File::create(fp)?;
-        let header_bytes = self.header.as_bytes();
-        let total_header_size = header_bytes.len() + DATA.len() + 4; // RIFF to end of FMT chunk, then 4 bytes for "data", 4 bytes for the size of the data chunk
+        let header_bytes = self.header().as_bytes();
 
-        let total_data_size = self.samples.len() * std::mem::size_of::<T>();
+        let f = std::fs::File::create(p)?;
+        let mut buf_writer: BufWriter<File> = BufWriter::new(f);
+        let data_size_bytes = sample_bytes.len() as u32; // write up to the data size
 
-        let mut out_buf: Vec<u8> = Vec::with_capacity(total_header_size + total_data_size);
-        unsafe { out_buf.set_len(total_header_size + total_data_size) }
-        out_buf[0..header_bytes.len()].copy_from_slice(&header_bytes);
-
-        // write data chunk
-        out_buf[header_bytes.len()..header_bytes.len() + DATA.len()].copy_from_slice(DATA);
-        // write data chunk size
-        out_buf[header_bytes.len() + DATA.len()..header_bytes.len() + DATA.len() + 4]
-            .copy_from_slice(&(total_data_size as u32).to_ne_bytes());
-
-        // write data
-        out_buf[header_bytes.len() + DATA.len() + 4..].copy_from_slice(self.samples.as_bytes());
-
-        file.write_all(&out_buf)?;
+        buf_writer.write_all(&header_bytes)?;
+        buf_writer.write_all(&DATA)?;
+        buf_writer.write_all(&data_size_bytes.to_ne_bytes())?; // write the data size
+        buf_writer.write_all(&sample_bytes)?; // write the data
         Ok(())
     }
 
-    /// Used to convert between the different types of samples audio data.
-    /// This function will consume the current Wav struct and return a new Wav struct with the specified type.
-    pub fn to<F>(mut self) -> WaversResult<Wav<F>>
-    where
-        for<'a> T: 'a + ConvertTo<F> + Debug + ConvertTo<F>,
-        for<'a> F: 'a + AudioSample + Debug + PartialEq + Copy + Sync + Send + ConvertTo<T>,
-        i16: ConvertTo<F>,
-        i32: ConvertTo<F>,
-        f32: ConvertTo<F>,
-        f64: ConvertTo<F>,
-    {
-        self.header.fmt_chunk.update_header(TypeId::of::<F>())?;
-        let converted_samples = self.samples.convert::<F>();
-        Ok(Wav {
-            header: self.header,
-            samples: converted_samples,
-        })
+    /// Returns a reference header of the wav file.
+    pub fn header(&self) -> &WavHeader {
+        &self.wav_info.wav_header
     }
 
-    /// Used to convert between the different types of samples audio data.
-    /// This function will NOT consume the current Wav struct and return a new Wav struct with the specified type.
-    pub fn as_<F>(&self) -> WaversResult<Wav<F>>
-    where
-        for<'a> T: 'a + ConvertTo<F> + Debug + ConvertTo<F>,
-        for<'a> F: 'a + AudioSample + Debug + PartialEq + Copy + Sync + Send + ConvertTo<T>,
-        i16: ConvertTo<F>,
-        i32: ConvertTo<F>,
-        f32: ConvertTo<F>,
-        f64: ConvertTo<F>,
-    {
-        let sample_rate = self.header.fmt_chunk.sample_rate;
-        let n_channels = self.header.fmt_chunk.channels;
-        let sample_size = self.samples.len();
-        let new_header = WavHeader::new_header::<F>(sample_rate, n_channels, sample_size)?;
-
-        Ok(Wav {
-            header: new_header,
-            samples: self.samples.clone().convert::<F>(),
-        })
+    /// Returns a mutable reference to the header of the wav file.
+    pub fn header_mut(&mut self) -> &mut WavHeader {
+        &mut self.wav_info.wav_header
     }
-}
 
-impl<T> Deref for Wav<T>
-where
-    for<'a> T: 'a + AudioSample,
-{
-    type Target = Samples<T>;
+    /// Returns the encoding of the wav file.
+    pub fn encoding(&self) -> WavType {
+        self.wav_info.wav_type
+    }
 
-    fn deref(&self) -> &Self::Target {
-        &self.samples
+    /// Returns the sample rate of the wav file.
+    pub fn sample_rate(&self) -> i32 {
+        self.header().fmt_chunk.sample_rate
+    }
+
+    /// Returns the number of channels of the wav file.
+    pub fn n_channels(&self) -> u16 {
+        self.header().fmt_chunk.channels
+    }
+
+    /// Returns the number of samples in the wav file.
+    pub fn n_samples(&self) -> usize {
+        let (_, data_size_bytes) = self.header().data().into();
+        data_size_bytes as usize / std::mem::size_of::<T>()
+    }
+
+    /// Returns the duration of the wav file in seconds.
+    pub fn duration(&self) -> u32 {
+        let data_size = self.header().data().size;
+
+        let sample_rate = self.sample_rate() as u32;
+        let n_channels = self.n_channels() as u32;
+        let bytes_per_sample = (self.header().fmt_chunk.bits_per_sample / 8) as u32;
+
+        data_size / (sample_rate * n_channels * bytes_per_sample)
+    }
+
+    /// Returns the sample rate, number of channels, duration and encoding of a wav file.
+    pub fn wav_spec(&self) -> (i32, u16, u32, WavType) {
+        let sample_rate = self.sample_rate();
+        let n_channels = self.n_channels();
+        let duration = self.duration();
+        (sample_rate, n_channels, duration, self.encoding())
     }
 }
 
-impl<T> DerefMut for Wav<T>
-where
-    for<'a> T: 'a + AudioSample,
-{
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.samples
+/// Returns the sample rate, number of channels, duration and encoding of a wav file.
+/// Convenmience function which opens the wav file and reads the header.
+pub fn wav_spec<P: AsRef<Path>>(p: P) -> WaversResult<(i32, u16, u32, WavType)> {
+    let wav = Wav::<i16>::from_path(p)?;
+    Ok(wav.wav_spec())
+}
+
+/// Struct representing the information of a wav file.
+#[cfg(not(feature = "pyo3"))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WavInfo {
+    pub wav_type: WavType, // the type of the wav file
+    pub wav_header: WavHeader,
+}
+
+/// Struct representing the information of a wav file.
+/// This struct is used when the pyo3 feature is enabled.
+#[cfg(feature = "pyo3")]
+#[pyclass]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WavInfo {
+    pub wav_type: WavType, // the type of the wav file
+    pub wav_header: WavHeader,
+}
+
+impl Into<(WavHeader, WavType)> for WavInfo {
+    fn into(self) -> (WavHeader, WavType) {
+        (self.wav_header, self.wav_type)
     }
 }
 
-impl<T> AsRef<Samples<T>> for Wav<T>
-where
-    for<'a> T: 'a + AudioSample + AsRef<Samples<T>>,
-{
-    fn as_ref(&self) -> &Samples<T> {
-        &self.samples
+impl TryInto<WavType> for TypeId {
+    type Error = WaversError;
+
+    fn try_into(self) -> Result<WavType, Self::Error> {
+        if self == TypeId::of::<i16>() {
+            Ok(WavType::Pcm16)
+        } else if self == TypeId::of::<i32>() {
+            Ok(WavType::Pcm32)
+        } else if self == TypeId::of::<f32>() {
+            Ok(WavType::Float32)
+        } else if self == TypeId::of::<f64>() {
+            Ok(WavType::Float64)
+        } else {
+            Err(WaversError::InvalidType(format!("Invalid type {:?}", self)))
+        }
     }
 }
 
-impl<T> AsMut<Samples<T>> for Wav<T>
-where
-    for<'a> T: 'a + AudioSample,
-{
-    fn as_mut(&mut self) -> &mut Samples<T> {
-        &mut self.samples
+impl Into<usize> for WavType {
+    fn into(self) -> usize {
+        match self {
+            WavType::Pcm16 => std::mem::size_of::<i16>(),
+            WavType::Pcm32 => std::mem::size_of::<i32>(),
+            WavType::Float32 => std::mem::size_of::<f32>(),
+            WavType::Float64 => std::mem::size_of::<f64>(),
+        }
     }
 }
 
-impl<T> Display for Wav<T>
-where
-    for<'a> T: 'a + AudioSample + Debug,
-{
+/// Enum representing the encoding of a wav file.
+#[cfg(not(feature = "pyo3"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WavType {
+    Pcm16,
+    Pcm32,
+    Float32,
+    Float64,
+}
+
+/// Enum representing the encoding of a wav file.
+/// This enum is used when the pyo3 feature is enabled.
+#[cfg(feature = "pyo3")]
+#[pyclass]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WavType {
+    Pcm16,
+    Pcm32,
+    Float32,
+    Float64,
+}
+
+impl Display for WavType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:#?}\n{:?}", self.header, self.samples)
+        match self {
+            WavType::Pcm16 => write!(f, "PCM16"),
+            WavType::Pcm32 => write!(f, "PCM32"),
+            WavType::Float32 => write!(f, "Float32"),
+            WavType::Float64 => write!(f, "Float64"),
+        }
+    }
+}
+
+impl TryFrom<(u16, u16)> for WavType {
+    type Error = WaversError;
+
+    fn try_from(value: (u16, u16)) -> Result<Self, Self::Error> {
+        Ok(match value {
+            (1, 16) => WavType::Pcm16,
+            (1, 32) => WavType::Pcm32,
+            (3, 32) => WavType::Float32,
+            (3, 64) => WavType::Float64,
+            _ => return Err(WaversError::InvalidType("Invalid wav type".into())),
+        })
+    }
+}
+
+impl Into<TypeId> for WavType {
+    fn into(self) -> TypeId {
+        match self {
+            WavType::Pcm16 => TypeId::of::<i16>(),
+            WavType::Pcm32 => TypeId::of::<i32>(),
+            WavType::Float32 => TypeId::of::<f32>(),
+            WavType::Float64 => TypeId::of::<f64>(),
+        }
+    }
+}
+
+impl Into<(u16, u16, u16)> for WavType {
+    fn into(self) -> (u16, u16, u16) {
+        match self {
+            WavType::Pcm16 => (1, 16, 2),
+            WavType::Pcm32 => (1, 32, 4),
+            WavType::Float32 => (3, 32, 4),
+            WavType::Float64 => (3, 64, 8),
+        }
     }
 }
 
 #[cfg(feature = "ndarray")]
-use crate::conversion::ndarray_conversion::{AsNdarray, IntoNdarray, IntoWav};
-#[cfg(feature = "ndarray")]
-use ndarray::{Array2, ArrayBase, CowArray, ShapeError};
+use crate::conversion::{AsNdarray, IntoNdarray};
 
 #[cfg(feature = "ndarray")]
-impl<T> IntoNdarray for Wav<T>
+impl<T: AudioSample> IntoNdarray for Wav<T>
 where
-    T: AudioSample,
-{
-    type Target = T;
-
-    fn into_ndarray(self) -> Result<Array2<Self::Target>, ShapeError> {
-        let n_channels = self.header.fmt_chunk.channels as usize;
-        let shape = (self.len() / n_channels, n_channels);
-        let copied_data = self.samples.as_ref();
-        let arr = ArrayBase::from(copied_data.to_owned());
-        arr.into_shape(shape)
-    }
-}
-
-#[cfg(feature = "ndarray")]
-impl<T> AsNdarray for Wav<T>
-where
-    T: AudioSample,
-{
-    type Target = T;
-
-    fn as_ndarray(&self) -> Result<CowArray<Self::Target, ndarray::Ix2>, ShapeError> {
-        let n_channels = self.header.fmt_chunk.channels as usize;
-        let shape = (self.len() / n_channels, n_channels);
-        let copied_data = &self.samples;
-        let arr = CowArray::from(copied_data);
-        arr.into_shape(shape)
-    }
-}
-
-#[cfg(feature = "ndarray")]
-impl<T> IntoWav for Array2<T>
-where
-    T: AudioSample + Debug + Copy + PartialEq,
     i16: ConvertTo<T>,
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
 {
     type Target = T;
-    fn into(self, sample_rate: i32) -> WaversResult<Wav<T>> {
-        let n_channels = self.shape()[0];
 
-        let samples: Samples<T> = Samples::from(self.into_raw_vec());
+    fn into_ndarray(mut self) -> WaversResult<(Array2<Self::Target>, i32)> {
+        let n_channels = self.header().fmt_chunk.channels as usize;
 
-        let t_type = TypeId::of::<T>();
-        let header = {
-            if t_type == I16 {
-                WavHeader::new_header::<i16>(sample_rate, n_channels as u16, samples.len())?
-            } else if t_type == I32 {
-                WavHeader::new_header::<i32>(sample_rate, n_channels as u16, samples.len())?
-            } else if t_type == F32 {
-                WavHeader::new_header::<f32>(sample_rate, n_channels as u16, samples.len())?
-            } else if t_type == F64 {
-                WavHeader::new_header::<f64>(sample_rate, n_channels as u16, samples.len())?
-            } else {
-                return Err(WaversError::InvalidType(format!("{:?}", t_type)));
-            }
-        };
+        let copied_data: &[T] = &self.read()?.samples;
+        let length = copied_data.len();
+        let shape = (length / n_channels, n_channels);
 
-        Ok(Wav { header, samples })
+        let arr: Array2<T> = Array::from_shape_vec(shape, copied_data.to_vec())?;
+        Ok((arr, self.sample_rate()))
+    }
+}
+
+#[cfg(feature = "ndarray")]
+impl<T: AudioSample> AsNdarray for Wav<T>
+where
+    i16: ConvertTo<T>,
+    i32: ConvertTo<T>,
+    f32: ConvertTo<T>,
+    f64: ConvertTo<T>,
+{
+    type Target = T;
+
+    fn as_ndarray(&mut self) -> WaversResult<(Array2<Self::Target>, i32)> {
+        let n_channels = self.header().fmt_chunk.channels as usize;
+        let copied_data: Box<[T]> = self.read()?.samples.to_owned();
+        let copied_data: &[T] = &copied_data;
+        let length = copied_data.len();
+
+        let shape = (length / n_channels, n_channels);
+        let arr: Array2<T> = Array::from_shape_vec(shape, copied_data.to_vec())?;
+        Ok((arr, self.sample_rate()))
     }
 }
 
@@ -445,14 +415,14 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Samples<T>
 where
-    for<'a> T: 'a + AudioSample,
+    T: AudioSample,
 {
     pub(crate) samples: Box<[T]>,
 }
 
 impl<T> AsRef<[T]> for Samples<T>
 where
-    for<'a> T: 'a + AudioSample,
+    T: AudioSample,
 {
     fn as_ref(&self) -> &[T] {
         &self.samples
@@ -461,7 +431,7 @@ where
 
 impl<T> AsMut<[T]> for Samples<T>
 where
-    for<'a> T: 'a + AudioSample,
+    T: AudioSample,
 {
     fn as_mut(&mut self) -> &mut [T] {
         &mut self.samples
@@ -470,7 +440,7 @@ where
 
 impl<T> Deref for Samples<T>
 where
-    for<'a> T: 'a + AudioSample,
+    T: AudioSample,
 {
     type Target = [T];
 
@@ -481,7 +451,7 @@ where
 
 impl<T> DerefMut for Samples<T>
 where
-    for<'a> T: 'a + AudioSample,
+    T: AudioSample,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.samples
@@ -491,7 +461,7 @@ where
 // From Vec
 impl<T> From<Vec<T>> for Samples<T>
 where
-    for<'a> T: 'a + AudioSample,
+    T: AudioSample,
 {
     fn from(samples: Vec<T>) -> Self {
         Samples {
@@ -503,7 +473,7 @@ where
 // From Slice
 impl<T> From<&[T]> for Samples<T>
 where
-    for<'a> T: 'a + AudioSample,
+    T: AudioSample,
 {
     fn from(samples: &[T]) -> Self {
         Samples {
@@ -515,7 +485,7 @@ where
 // From boxed slice
 impl<T> From<Box<[T]>> for Samples<T>
 where
-    for<'a> T: 'a + AudioSample,
+    T: AudioSample,
 {
     fn from(samples: Box<[T]>) -> Self {
         Samples { samples }
@@ -525,7 +495,7 @@ where
 // From u8 Buffer
 impl<T> From<&[u8]> for Samples<T>
 where
-    for<'a> T: 'a + AudioSample,
+    T: AudioSample,
 {
     fn from(bytes: &[u8]) -> Self {
         let casted_samples: &[T] = cast_slice::<u8, T>(bytes);
@@ -537,7 +507,7 @@ where
 
 impl<T> Display for Samples<T>
 where
-    for<'a> T: 'a + AudioSample + Debug,
+    T: AudioSample + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", &self.samples)
@@ -546,7 +516,7 @@ where
 
 impl<T> Samples<T>
 where
-    for<'a> T: 'a + AudioSample,
+    T: AudioSample,
 {
     /// Construct a new Samples struct from a boxed slice of audio samples.
     pub fn new(samples: Box<[T]>) -> Self {
@@ -555,14 +525,11 @@ where
 
     /// Conversts the samples to the specified type ``F``. If the type is the same as the current type, the function will return self.
     /// The function will consume the current Samples struct and return a new Samples struct with the specified type.
+    #[inline(always)]
     pub fn convert<F: AudioSample>(self) -> Samples<F>
     where
-        for<'a> T: ConvertTo<F> + Debug + PartialEq + Copy + Sync,
-        for<'a> F: 'a + AudioSample + Debug + Sync + Send,
-        i16: ConvertTo<F>,
-        i32: ConvertTo<F>,
-        f32: ConvertTo<F>,
-        f64: ConvertTo<F>,
+        T: ConvertTo<F>,
+        Box<[T]>: ConvertSlice<F>,
     {
         // Quick check to see if we're converting to the same type, if so, just return self
         if TypeId::of::<T>() == TypeId::of::<F>() {
@@ -571,14 +538,7 @@ where
                 samples: Box::from(cast_slice::<T, F>(&data)),
             };
         }
-
-        let len = self.samples.len();
-
-        let mut converted_samples: Box<[F]> = alloc_sample_buffer(len);
-
-        for (i, sample) in self.samples.iter().enumerate() {
-            converted_samples[i] = sample.convert_to();
-        }
+        let converted_samples = self.samples.convert_slice();
         Samples {
             samples: converted_samples,
         }
@@ -595,7 +555,8 @@ impl Samples<i32> {}
 impl Samples<f32> {}
 impl Samples<f64> {}
 
-fn alloc_box_buffer(len: usize) -> Box<[u8]> {
+/// Helper function to allocate a fixed sized, heap allocated buffer of bytes.
+pub(crate) fn alloc_box_buffer(len: usize) -> Box<[u8]> {
     if len == 0 {
         return <Box<[u8]>>::default();
     }
@@ -609,7 +570,8 @@ fn alloc_box_buffer(len: usize) -> Box<[u8]> {
     unsafe { Box::from_raw(slice_ptr) }
 }
 
-fn alloc_sample_buffer<T>(len: usize) -> Box<[T]>
+/// Helper function to allocate a fixed sized, heap allocated buffer of type T.
+pub(crate) fn alloc_sample_buffer<T>(len: usize) -> Box<[T]>
 where
     T: AudioSample + Copy + Debug,
 {
@@ -631,6 +593,9 @@ where
 mod core_tests {
     use super::*;
 
+    #[cfg(feature = "ndarray")]
+    use crate::IntoNdarray;
+
     use approx_eq::assert_approx_eq;
     use std::{fs::File, io::BufRead, path::Path, str::FromStr};
 
@@ -643,18 +608,32 @@ mod core_tests {
     const TEST_OUTPUT: &str = "./test_resources/tmp/";
 
     #[test]
+    pub fn duration_one_channel() {
+        let wav: Wav<i16> = Wav::from_path(ONE_CHANNEL_WAV_I16).unwrap();
+        let duration = wav.duration();
+        assert_eq!(duration, 10, "Expected duration of 10 seconds");
+    }
+
+    #[test]
+    pub fn duration_two_channel() {
+        let wav: Wav<i16> = Wav::from_path(TWO_CHANNEL_WAV_I16).unwrap();
+        let duration = wav.duration();
+        assert_eq!(duration, 10, "Expected duration of 10 seconds");
+    }
+
+    #[test]
     fn i16_i32_convert() {
-        let wav_i16 = Wav::<i16>::read(Path::new(ONE_CHANNEL_WAV_I16))
-            .unwrap()
-            .samples;
-        let wav_i32: Samples<i32> = wav_i16.convert();
+        let mut wav: Wav<i32> = Wav::from_path(ONE_CHANNEL_WAV_I16).unwrap();
 
-        let expected_i32_samples =
-            Wav::<i32>::read(Path::new("test_resources/one_channel_i32.wav"))
+        let wav_i32: &[i32] = &wav.read().unwrap();
+
+        let expected_i32_samples: &[i32] =
+            &Wav::<i32>::from_path("test_resources/one_channel_i32.wav")
                 .unwrap()
-                .samples;
+                .read()
+                .unwrap();
 
-        for (expected, actual) in expected_i32_samples[0..10].iter().zip(wav_i32.iter()) {
+        for (expected, actual) in expected_i32_samples.iter().zip(wav_i32.iter()) {
             assert_eq!(*expected, *actual, "{} != {}", expected, actual);
         }
     }
@@ -662,10 +641,12 @@ mod core_tests {
     #[cfg(feature = "ndarray")]
     #[test]
     fn wav_as_ndarray() {
-        let wav = Wav::<i16>::read(Path::new(ONE_CHANNEL_WAV_I16)).unwrap();
+        let wav: Wav<i16> =
+            Wav::<i16>::from_path(ONE_CHANNEL_WAV_I16).expect("Failed to read file");
+
         let expected_wav: Vec<i16> = read_text_to_vec(Path::new(ONE_CHANNEL_EXPECTED_I16)).unwrap();
 
-        let arr = wav.into_ndarray().unwrap();
+        let (arr, sr) = wav.into_ndarray().unwrap();
         assert_eq!(arr.shape()[0], 1, "Expected 1 channels");
         for (expected, actual) in expected_wav.iter().zip(arr) {
             assert_eq!(*expected, actual, "{} != {}", expected, actual);
@@ -675,7 +656,8 @@ mod core_tests {
     #[cfg(feature = "ndarray")]
     #[test]
     fn two_channel_as_ndarray() {
-        let wav: Wav<i16> = Wav::<i16>::read(Path::new(TWO_CHANNEL_WAV_I16)).unwrap();
+        let wav: Wav<i16> =
+            Wav::<i16>::from_path(TWO_CHANNEL_WAV_I16).expect("Failed to open file");
         let expected_wav: Vec<i16> = read_text_to_vec(Path::new(ONE_CHANNEL_EXPECTED_I16)).unwrap();
         let mut new_expected = Vec::with_capacity(expected_wav.len() * 2);
         for sample in expected_wav {
@@ -685,10 +667,10 @@ mod core_tests {
 
         let expected_wav = new_expected;
 
-        let two_channel_arr = wav.into_ndarray().unwrap();
+        let (two_channel_arr, sr): (Array2<i16>, i32) = wav.into_ndarray().unwrap();
         assert_eq!(two_channel_arr.shape()[0], 2, "Expected 2 channels");
-        for (expected, actual) in std::iter::zip(expected_wav, two_channel_arr) {
-            assert_eq!(expected, actual, "{} != {}", expected, actual);
+        for (expected, actual) in expected_wav.iter().zip(two_channel_arr) {
+            assert_eq!(*expected, actual, "{} != {}", expected, actual);
         }
     }
 
@@ -717,89 +699,14 @@ mod core_tests {
         }
     }
 
-    use std::stringify;
-    macro_rules! read_tests {
-        ($($T:ident), *) => {
-            $(
-                paste::item! {
-                    #[test]
-                    fn [<read_$T>]() {
-                        let t_string: &str = stringify!($T);
-
-                        let wav_str = format!("./test_resources/one_channel_{}.wav", t_string);
-                        let expected_str = format!("./test_resources/one_channel_{}.txt", t_string);
-
-
-                        let wav: Wav<$T> = match Wav::<$T>::read(Path::new(&wav_str)) {
-                            Ok(w) => w,
-                            Err(e) => {eprintln!("{}\n{}", wav_str, e); panic!("Failed to read wav file")}
-                        };
-                        let expected_data: Vec<$T> = match read_text_to_vec(Path::new(&expected_str)) {
-                            Ok(w) => w,
-                            Err(e) => {eprintln!("{}\n{}", wav_str, e); panic!("Failed to read txt file")}
-                        };
-
-                        for (expected, actual) in expected_data.iter().zip(wav.samples.iter()) {
-                            assert_eq!(*expected, *actual, "{} != {}", expected, actual);
-                        }
-                    }
-                }
-            )*
-        }
-    }
-    read_tests!(i16, i32, f32, f64);
-
-    macro_rules! write_tests {
-        ($($T:ident), *) => {
-            $(
-                paste::item! {
-                    #[test]
-                    fn [<write_$T>]() {
-                        if !Path::new(TEST_OUTPUT).exists() {
-                            std::fs::create_dir(Path::new(TEST_OUTPUT)).unwrap();
-                        }
-                        let t_string: &str = stringify!($T);
-
-                        let wav_str = format!("./test_resources/one_channel_{}.wav", t_string);
-                        let expected_str = format!("./test_resources/one_channel_{}.txt", t_string);
-
-                        let wav: Wav<$T> = match Wav::<$T>::read(Path::new(&wav_str)) {
-                            Ok(w) => w,
-                            Err(e) => {eprintln!("{}\n{}", wav_str, e); panic!("Failed to read wav file")}
-                        };
-                        let expected_data: Vec<$T> = match read_text_to_vec(Path::new(&expected_str)) {
-                            Ok(w) => w,
-                            Err(e) => {eprintln!("{}\n{}", wav_str, e); panic!("Failed to read txt file")}
-                        };
-                        for (expected, actual) in expected_data.iter().zip(wav.samples.iter()) {
-                            assert_eq!(*expected, *actual, "{} != {}", expected, actual);
-                        }
-                        let out_path = format!("{}{}", TEST_OUTPUT, "_one_channel_[<$T>].wav");
-                        wav.write(Path::new(&out_path)).unwrap();
-
-                        let wav: Wav<$T> = Wav::<$T>::read(Path::new(&out_path)).unwrap();
-
-                        for (expected, actual) in expected_data.iter().zip(wav.samples.iter()) {
-                            assert_eq!(*expected, *actual, "{} != {}", expected, actual);
-                        }
-
-                        std::fs::remove_file(Path::new(&out_path)).unwrap();
-                    }
-                }
-            )*
-        };
-    }
-
-    write_tests!(i32, f32, f64);
-
     #[test]
     fn read_and_convert() {
         let expected_samples =
             read_text_to_vec::<f32>(Path::new(ONE_CHANNEL_EXPECTED_F32)).unwrap();
 
-        let wav: &[f32] = &read::<f32>(Path::new(ONE_CHANNEL_WAV_I16)).unwrap();
-
-        for (expected, actual) in expected_samples.iter().zip(wav.iter()) {
+        let mut wav: Wav<f32> = Wav::from_path(ONE_CHANNEL_WAV_I16).unwrap();
+        let samples: &[f32] = &wav.read().unwrap();
+        for (expected, actual) in expected_samples.iter().zip(samples) {
             assert_approx_eq!(*expected as f64, *actual as f64, 1e-4);
         }
     }
@@ -809,15 +716,18 @@ mod core_tests {
         if !Path::new(TEST_OUTPUT).exists() {
             std::fs::create_dir(Path::new(TEST_OUTPUT)).unwrap();
         }
-        let wav: Wav<i16> = Wav::<i16>::read(Path::new(ONE_CHANNEL_WAV_I16)).unwrap();
+
+        let mut wav: Wav<f32> = Wav::<f32>::from_path(ONE_CHANNEL_WAV_I16).unwrap();
         let out_fp = format!("{}{}", TEST_OUTPUT, "convert_write_read.wav");
-        wav.as_::<f32>().unwrap().write(&out_fp).unwrap();
-        let wav: Wav<f32> = Wav::<f32>::read(Path::new(&out_fp)).unwrap();
+        wav.write::<f32, _>(Path::new(&out_fp)).unwrap();
+
+        let mut wav: Wav<f32> = Wav::<f32>::from_path(&out_fp).unwrap();
+        let actual_samples: &[f32] = &wav.read().unwrap();
 
         let expected_samples =
             read_text_to_vec::<f32>(Path::new(ONE_CHANNEL_EXPECTED_F32)).unwrap();
 
-        for (expected, actual) in expected_samples.iter().zip(wav.as_ref()) {
+        for (expected, actual) in expected_samples.iter().zip(actual_samples) {
             assert_approx_eq!(*expected as f64, *actual as f64, 1e-4);
         }
         std::fs::remove_file(Path::new(&out_fp)).unwrap();
@@ -825,7 +735,7 @@ mod core_tests {
 
     #[test]
     fn can_read_two_channel() {
-        let wav: Wav<i16> = Wav::<i16>::read(Path::new(TWO_CHANNEL_WAV_I16)).unwrap();
+        let mut wav: Wav<i16> = Wav::<i16>::from_path(TWO_CHANNEL_WAV_I16).unwrap();
         let expected_samples =
             read_text_to_vec::<i16>(Path::new(ONE_CHANNEL_EXPECTED_I16)).unwrap();
         let mut new_expected = Vec::with_capacity(expected_samples.len() * 2);
@@ -836,22 +746,26 @@ mod core_tests {
 
         let expected_samples = new_expected;
 
-        for (expected, actual) in expected_samples.iter().zip(wav.samples.iter()) {
+        for (expected, actual) in expected_samples.iter().zip(wav.read().unwrap().as_ref()) {
             assert_eq!(*expected, *actual, "{} != {}", expected, actual);
         }
     }
 
     #[test]
-    fn wav_spec_correct() {
-        let spec = WavSpec::try_from(Path::new(ONE_CHANNEL_WAV_I16)).unwrap();
-        assert_eq!(spec.fmt_data.format, 1);
-        assert_eq!(spec.fmt_data.channels, 1);
-        assert_eq!(spec.fmt_data.sample_rate, 16000);
-        assert_eq!(spec.fmt_data.bits_per_sample, 16);
-        assert_eq!(spec.fmt_data.block_align, 2);
-        assert_eq!(spec.encoding.format, 1);
-        assert_eq!(spec.encoding.bits_per_sample, 16);
-        assert_eq!(spec.duration, 10);
+    fn read_some_then_read_remainder() {
+        let mut wav: Wav<i16> =
+            Wav::from_path(ONE_CHANNEL_WAV_I16).expect("Failed to open wav file");
+        let first_second_samples = wav.read_samples(wav.sample_rate() as usize).unwrap();
+        assert_eq!(first_second_samples.len(), wav.sample_rate() as usize);
+
+        let remaining_samples = wav.read().unwrap();
+        assert_eq!(
+            remaining_samples.len(),
+            wav.n_samples() - wav.sample_rate() as usize
+        );
+
+        let all_samples = wav.read().unwrap();
+        assert_eq!(all_samples.len(), wav.n_samples());
     }
 
     fn read_lines<P>(filename: P) -> std::io::Result<std::io::Lines<std::io::BufReader<File>>>

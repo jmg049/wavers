@@ -37,6 +37,7 @@ opt-level = 3
 panic = "abort"
 strip = true
 
+
 [profile.bench]
 inherits = "release"
 debug = true
@@ -49,3 +50,4 @@ harness = false
 [features]
 ndarray = ["dep:ndarray"]
 pyo3 = ["dep:pyo3"]
+simd = []

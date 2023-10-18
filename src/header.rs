@@ -123,6 +123,7 @@ impl WavHeader {
             HeaderChunkInfo::new(36, data_size_bytes as u32),
         );
         let current_file_size = file_size_bytes;
+
         Ok(WavHeader {
             header_info,
             fmt_chunk,

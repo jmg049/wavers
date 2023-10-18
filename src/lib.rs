@@ -1,3 +1,4 @@
+#![feature(portable_simd)]
 //!
 //! # Wavers
 //! WaveRs is a fast and lightweight library for reading and writing ``wav`` files.
@@ -134,32 +135,23 @@ use std::io::Write;
 use std::path::Path;
 
 pub use crate::conversion::{AudioSample, ConvertTo};
+
+pub use crate::conversion::ConvertSlice;
+
 pub use crate::core::ReadSeek;
 pub use crate::core::{Samples, Wav};
 pub use crate::error::WaversResult;
 pub use crate::header::{read_header, FmtChunk, WavHeader};
 
 #[inline(always)]
-pub fn read<T: AudioSample>(data: Box<dyn ReadSeek>) -> WaversResult<Samples<T>>
+pub fn read<T: AudioSample, P: AsRef<Path>>(path: P) -> WaversResult<Samples<T>>
 where
-    T: ConvertTo<T>,
     i16: ConvertTo<T>,
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
 {
-    Wav::<T>::new(data)?.read::<T>()
-}
-
-pub fn read_path<T: AudioSample, P: AsRef<Path>>(path: P) -> WaversResult<Samples<T>>
-where
-    T: ConvertTo<T>,
-    i16: ConvertTo<T>,
-    i32: ConvertTo<T>,
-    f32: ConvertTo<T>,
-    f64: ConvertTo<T>,
-{
-    Wav::<T>::from_path(path)?.read::<T>()
+    Wav::<T>::from_path(path)?.read()
 }
 
 #[inline(always)]

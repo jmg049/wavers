@@ -1,0 +1,11 @@
+,Ref_Wave,Test_Wave,MOS
+0,quickstart_genspeech/LPCNet_listening_test/mfall/dir1/ref.wav,quickstart_genspeech/LPCNet_listening_test/mfall/dir1/lpcnq.wav,3.823139469
+1,quickstart_genspeech/LPCNet_listening_test/vec18/dir1/ref.wav,quickstart_genspeech/LPCNet_listening_test/vec18/dir1/lpcnq.wav,4.122819767
+2,quickstart_genspeech/LPCNet_listening_test/mfall/dir2/ref.wav,quickstart_genspeech/LPCNet_listening_test/mfall/dir2/lpcnq.wav,4.312159404
+3,quickstart_genspeech/LPCNet_listening_test/vec18/dir2/ref.wav,quickstart_genspeech/LPCNet_listening_test/vec18/dir2/lpcnq.wav,3.054721495
+4,quickstart_genspeech/LPCNet_listening_test/mfall/dir3/ref.wav,quickstart_genspeech/LPCNet_listening_test/mfall/dir3/lpcnq.wav,3.351932004
+5,quickstart_genspeech/LPCNet_listening_test/vec18/dir3/ref.wav,quickstart_genspeech/LPCNet_listening_test/vec18/dir3/lpcnq.wav,3.891214735
+6,quickstart_genspeech/LPCNet_listening_test/mfall/dir4/ref.wav,quickstart_genspeech/LPCNet_listening_test/mfall/dir4/lpcnq.wav,3.710286068
+7,quickstart_genspeech/LPCNet_listening_test/vec18/dir4/ref.wav,quickstart_genspeech/LPCNet_listening_test/vec18/dir4/lpcnq.wav,3.548417842
+8,quickstart_genspeech/LPCNet_listening_test/mfall/dir5/ref.wav,quickstart_genspeech/LPCNet_listening_test/mfall/dir5/lpcnq.wav,3.5101505910000004
+9,quickstart_genspeech/LPCNet_listening_test/vec18/dir5/ref.wav,quickstart_genspeech/LPCNet_listening_test/vec18/dir5/lpcnq.wav,3.439382387

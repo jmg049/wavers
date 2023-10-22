@@ -127,7 +127,7 @@
 
 mod conversion;
 mod core;
-mod error;
+pub mod error;
 mod header;
 
 use std::fs;
@@ -150,6 +150,10 @@ where
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
+    Box<[i16]>: ConvertSlice<T>,
+    Box<[i32]>: ConvertSlice<T>,
+    Box<[f32]>: ConvertSlice<T>,
+    Box<[f64]>: ConvertSlice<T>,
 {
     Wav::<T>::from_path(path)?.read()
 }
@@ -166,6 +170,10 @@ where
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
+    Box<[i16]>: ConvertSlice<T>,
+    Box<[i32]>: ConvertSlice<T>,
+    Box<[f32]>: ConvertSlice<T>,
+    Box<[f64]>: ConvertSlice<T>,
 {
     let sample_bytes = samples.as_bytes();
     let header_bytes =

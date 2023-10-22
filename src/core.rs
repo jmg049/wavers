@@ -21,20 +21,14 @@ impl<T: ReadSeek> ReadSeek for std::io::BufReader<T> {}
 
 pub struct Wav<T: AudioSample>
 where
-    Box<[i16]>: ConvertSlice<T>,
-    Box<[i32]>: ConvertSlice<T>,
-    Box<[f32]>: ConvertSlice<T>,
-    Box<[f64]>: ConvertSlice<T>,
-
-    Box<[T]>: ConvertSlice<i16>,
-    Box<[T]>: ConvertSlice<i32>,
-    Box<[T]>: ConvertSlice<f32>,
-    Box<[T]>: ConvertSlice<f64>,
-
     i16: ConvertTo<T>,
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
+    Box<[i16]>: ConvertSlice<T>,
+    Box<[i32]>: ConvertSlice<T>,
+    Box<[f32]>: ConvertSlice<T>,
+    Box<[f64]>: ConvertSlice<T>,
 {
     _phantom: std::marker::PhantomData<T>,
     reader: Box<dyn ReadSeek>,
@@ -43,19 +37,14 @@ where
 
 impl<T: AudioSample> Wav<T>
 where
-    Box<[i16]>: ConvertSlice<T>,
-    Box<[i32]>: ConvertSlice<T>,
-    Box<[f32]>: ConvertSlice<T>,
-    Box<[f64]>: ConvertSlice<T>,
-    Box<[T]>: ConvertSlice<i16>,
-    Box<[T]>: ConvertSlice<i32>,
-    Box<[T]>: ConvertSlice<f32>,
-    Box<[T]>: ConvertSlice<f64>,
-
     i16: ConvertTo<T>,
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
+    Box<[i16]>: ConvertSlice<T>,
+    Box<[i32]>: ConvertSlice<T>,
+    Box<[f32]>: ConvertSlice<T>,
+    Box<[f64]>: ConvertSlice<T>,
 {
     pub fn header(&self) -> &WavHeader {
         &self.wav_info.wav_header
@@ -126,14 +115,6 @@ where
     where
         T: ConvertTo<F>,
         Box<[T]>: ConvertSlice<F>,
-        Box<[i16]>: ConvertSlice<T>,
-        Box<[i32]>: ConvertSlice<T>,
-        Box<[f32]>: ConvertSlice<T>,
-        Box<[f64]>: ConvertSlice<T>,
-        Box<[T]>: ConvertSlice<i16>,
-        Box<[T]>: ConvertSlice<i32>,
-        Box<[T]>: ConvertSlice<f32>,
-        Box<[T]>: ConvertSlice<f64>,
     {
         let samples = self.read()?.convert::<F>();
         let sample_bytes = samples.as_bytes();
@@ -154,20 +135,18 @@ where
         Ok(())
     }
 
-    pub fn from_path<P: AsRef<Path>>(path: P) -> WaversResult<Self>
-    where
-        Box<[i16]>: ConvertSlice<T>,
-        Box<[i32]>: ConvertSlice<T>,
-        Box<[f32]>: ConvertSlice<T>,
-        Box<[f64]>: ConvertSlice<T>,
-        Box<[T]>: ConvertSlice<i16>,
-        Box<[T]>: ConvertSlice<i32>,
-        Box<[T]>: ConvertSlice<f32>,
-        Box<[T]>: ConvertSlice<f64>,
-    {
+    pub fn from_path<P: AsRef<Path>>(path: P) -> WaversResult<Self> {
         let f = std::fs::File::open(path)?;
         let buf_reader: Box<dyn ReadSeek> = Box::new(std::io::BufReader::new(f));
         Self::new(buf_reader)
+    }
+
+    pub fn sample_rate(&self) -> i32 {
+        self.header().fmt_chunk.sample_rate
+    }
+
+    pub fn n_channels(&self) -> u16 {
+        self.header().fmt_chunk.channels
     }
 }
 
@@ -497,6 +476,7 @@ where
 #[cfg(test)]
 mod core_tests {
     use super::*;
+    use crate::conversion::ConvertSlice;
     use crate::{read, write};
 
     use approx_eq::assert_approx_eq;

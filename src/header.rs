@@ -400,7 +400,7 @@ mod header_tests {
 
     #[test]
     fn can_read_header() {
-        let mut file = File::open(TEST_FILE).unwrap();
+        let file = File::open(TEST_FILE).unwrap();
         let mut file = Box::new(file) as Box<dyn ReadSeek>;
         let wav_info = read_header(&mut file).expect("Failed to read header");
         assert_eq!(
@@ -411,7 +411,7 @@ mod header_tests {
 
     #[test]
     fn can_convert_to_and_from_bytes() {
-        let mut file = File::open(TEST_FILE).unwrap();
+        let file = File::open(TEST_FILE).unwrap();
         let mut file = Box::new(file) as Box<dyn ReadSeek>;
         let wav_info = read_header(&mut file).expect("Failed to read header");
         let fmt_bytes: [u8; FMT_SIZE] = wav_info.wav_header.fmt_chunk.into();

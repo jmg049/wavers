@@ -200,7 +200,7 @@ mod conversion_tests {
         let f32_samples: &[f32] = &f32_samples;
         let converted_i16_samples: Box<[f32]> = i16_samples.convert_slice();
 
-        for (idx, (expected_sample, actual_sample)) in
+        for (_, (expected_sample, actual_sample)) in
             converted_i16_samples.iter().zip(f32_samples).enumerate()
         {
             assert_approx_eq!(*expected_sample as f64, *actual_sample as f64, 1e-4);
@@ -261,21 +261,13 @@ mod conversion_tests {
 }
 
 #[cfg(feature = "ndarray")]
-pub mod ndarray_conversion {
-    use crate::{conversion::AudioSample, error::WaversResult};
-    use ndarray::{Array2, CowArray, Ix2, ShapeError};
-    pub trait IntoNdarray {
-        type Target: AudioSample;
-        fn into_ndarray(self) -> Result<Array2<Self::Target>, ShapeError>;
-    }
+pub trait IntoNdarray {
+    type Target: AudioSample;
+    fn into_ndarray(self) -> crate::WaversResult<ndarray::Array2<Self::Target>>;
+}
 
-    pub trait AsNdarray {
-        type Target: AudioSample;
-        fn as_ndarray(&self) -> Result<CowArray<Self::Target, Ix2>, ShapeError>;
-    }
-
-    pub trait IntoWav {
-        type Target: AudioSample;
-        fn into(self, sample_rate: i32) -> WaversResult<crate::core::Wav<Self::Target>>;
-    }
+#[cfg(feature = "ndarray")]
+pub trait AsNdarray {
+    type Target: AudioSample;
+    fn as_ndarray(&mut self) -> crate::WaversResult<ndarray::Array2<Self::Target>>;
 }

@@ -1,4 +1,3 @@
-#![feature(portable_simd)]
 //!
 //! # Wavers
 //! WaveRs is a fast and lightweight library for reading and writing ``wav`` files.
@@ -99,11 +98,10 @@
 //! ```
 //!
 //! ## Features
-//! The following section describes the features available in the WaveRs crate. Some will modify how WaveRs works internally, such as SIMD and Rayon, whereas the likes of Ndarray provide addtional functionality to you, the user.
-//!
+//! The following section describes the features available in the WaveRs crate.
 //! ### Ndarray
 //!
-//! The ``ndarray`` feature is used to provide functions that allow wav files to be read as ``ndarray`` 2-D arrays (samples x channels). There are two functions provided, ``into_ndarray`` and ``as_ndarray``. ``into_ndarray`` consumes the samples and ``as_ndarray`` creates a ``CowArray`` from the samples.
+//! The ``ndarray`` feature is used to provide functions that allow wav files to be read as ``ndarray`` 2-D arrays (samples x channels). There are two functions provided, ``into_ndarray`` and ``as_ndarray``. ``into_ndarray`` consumes the samples and ``as_ndarray`` creates a ``Array2`` from the samples.
 //!
 //! ```ignore
 //! use wavers::{read, Wav, AsNdarray, IntoNdarray};
@@ -115,7 +113,7 @@
 //! 	let i16_array: Array2<i16> = i16_wav.into_ndarray().unwrap();
 //!
 //! 	let i16_wav: Wav<i16> = read::<i16>(fp).unwrap();
-//! 	let i16_array: CowArray2<i16> = i16_wav.as_ndarray().unwrap();
+//! 	let i16_array: Array2<i16> = i16_wav.as_ndarray().unwrap();
 //! }
 //!
 //! ```
@@ -139,7 +137,7 @@ pub use crate::conversion::{AudioSample, ConvertTo};
 pub use crate::conversion::ConvertSlice;
 
 pub use crate::core::ReadSeek;
-pub use crate::core::{Samples, Wav};
+pub use crate::core::{wav_spec, Samples, Wav, WavType};
 pub use crate::error::WaversResult;
 pub use crate::header::{read_header, FmtChunk, WavHeader};
 
@@ -161,7 +159,7 @@ where
 #[inline(always)]
 pub fn write<T: AudioSample, P: AsRef<Path>>(
     fp: P,
-    samples: &Samples<T>,
+    samples: &[T],
     sample_rate: i32,
     n_channels: u16,
 ) -> WaversResult<()>
@@ -175,18 +173,19 @@ where
     Box<[f32]>: ConvertSlice<T>,
     Box<[f64]>: ConvertSlice<T>,
 {
-    let sample_bytes = samples.as_bytes();
+    let s = Samples::from(samples);
+    let samples_bytes = s.as_bytes();
     let header_bytes =
         WavHeader::new_header::<T>(sample_rate, n_channels, n_channels as usize)?.as_bytes();
 
     let mut f = fs::File::create(fp)?;
     f.write_all(&header_bytes)?;
 
-    let data_size_bytes = sample_bytes.len() as u32; // write up to the data size
+    let data_size_bytes = samples_bytes.len() as u32; // write up to the data size
     f.write_all(&data_size_bytes.to_ne_bytes())?; // write the data size
-    f.write_all(&sample_bytes)?; // write the data
+    f.write_all(&samples_bytes)?; // write the data
     Ok(())
 }
 
 #[cfg(feature = "ndarray")]
-pub use conversion::ndarray_conversion::{AsNdarray, IntoNdarray, IntoWav};
+pub use conversion::{AsNdarray, IntoNdarray};

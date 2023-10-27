@@ -1,8 +1,8 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hound::WavReader;
-use rand::Rng;
+
 use std::{fs::File, path::Path, time::Duration};
-use wavers::{read, ConvertSlice, ConvertTo, ReadSeek, Wav};
+use wavers::{read, ReadSeek, Wav};
 
 const BENCHMARK_SIZE: usize = 10;
 
@@ -182,38 +182,38 @@ fn bench_wavers_vs_hound_native_i16(c: &mut Criterion) {
     group.finish();
 }
 
-#[cfg(feature = "ndarray")]
-fn bench_as_ndarray(c: &mut Criterion) {
-    use ndarray::{Array2, CowArray, Ix2};
-    use wavers::{AsNdarray, IntoNdarray};
+// #[cfg(feature = "ndarray")]
+// fn bench_as_ndarray(c: &mut Criterion) {
+//     use ndarray::{Array2, CowArray, Ix2};
+//     use wavers::{AsNdarray, IntoNdarray};
 
-    let mut group = c.benchmark_group("Ndarray");
-    group.sample_size(400).sample_size(400);
+//     let mut group = c.benchmark_group("Ndarray");
+//     group.sample_size(400).sample_size(400);
 
-    group.bench_function("i16 as slice", |b| {
-        b.iter(|| {
-            let _: &[i16] = black_box(&Wav::<i16>::read(black_box(ONE_CHANNEL_WAV_I16))).unwrap();
-        })
-    });
+//     group.bench_function("i16 as slice", |b| {
+//         b.iter(|| {
+//             let _: &[i16] = black_box(&Wav::<i16>::read(black_box(ONE_CHANNEL_WAV_I16))).unwrap();
+//         })
+//     });
 
-    group.bench_function("i16 as array", |b| {
-        b.iter(|| {
-            let _: CowArray<i16, Ix2> = black_box(Wav::<i16>::read(black_box(ONE_CHANNEL_WAV_I16)))
-                .unwrap()
-                .as_ndarray()
-                .unwrap();
-        });
-    });
+//     group.bench_function("i16 as array", |b| {
+//         b.iter(|| {
+//             let _: CowArray<i16, Ix2> = black_box(Wav::<i16>::read(black_box(ONE_CHANNEL_WAV_I16)))
+//                 .unwrap()
+//                 .as_ndarray()
+//                 .unwrap();
+//         });
+//     });
 
-    group.bench_function("i16 into array", |b| {
-        b.iter(|| {
-            let _: Array2<i16> = black_box(Wav::<i16>::read(black_box(ONE_CHANNEL_WAV_I16)))
-                .unwrap()
-                .into_ndarray()
-                .unwrap();
-        });
-    });
-}
+//     group.bench_function("i16 into array", |b| {
+//         b.iter(|| {
+//             let _: Array2<i16> = black_box(Wav::<i16>::read(black_box(ONE_CHANNEL_WAV_I16)))
+//                 .unwrap()
+//                 .into_ndarray()
+//                 .unwrap();
+//         });
+//     });
+// }
 
 #[cfg(feature = "ndarray")]
 criterion_group!(benches, bench_as_ndarray);

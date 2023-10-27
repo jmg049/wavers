@@ -9,11 +9,18 @@ use std::path::Path;
 
 use bytemuck::cast_slice;
 
+#[cfg(feature = "ndarray")]
+use ndarray::{Array, Array2};
+
 use crate::conversion::ConvertSlice;
 
 use crate::conversion::{AudioSample, ConvertTo};
 use crate::error::{WaversError, WaversResult};
 use crate::header::{read_header, WavHeader, DATA};
+
+#[cfg(feature = "pyo3")]
+use pyo3::prelude::*;
+
 pub trait ReadSeek: Read + Seek {}
 
 impl ReadSeek for std::fs::File {}
@@ -46,14 +53,6 @@ where
     Box<[f32]>: ConvertSlice<T>,
     Box<[f64]>: ConvertSlice<T>,
 {
-    pub fn header(&self) -> &WavHeader {
-        &self.wav_info.wav_header
-    }
-
-    fn header_mut(&mut self) -> &mut WavHeader {
-        &mut self.wav_info.wav_header
-    }
-
     pub fn new(mut reader: Box<dyn ReadSeek>) -> WaversResult<Self> {
         let wav_info = read_header(&mut reader)?;
 
@@ -67,6 +66,12 @@ where
             reader,
             wav_info,
         })
+    }
+
+    pub fn from_path<P: AsRef<Path>>(path: P) -> WaversResult<Self> {
+        let f = std::fs::File::open(path)?;
+        let buf_reader: Box<dyn ReadSeek> = Box::new(std::io::BufReader::new(f));
+        Self::new(buf_reader)
     }
 
     #[inline(always)]
@@ -135,10 +140,17 @@ where
         Ok(())
     }
 
-    pub fn from_path<P: AsRef<Path>>(path: P) -> WaversResult<Self> {
-        let f = std::fs::File::open(path)?;
-        let buf_reader: Box<dyn ReadSeek> = Box::new(std::io::BufReader::new(f));
-        Self::new(buf_reader)
+    pub fn header(&self) -> &WavHeader {
+        &self.wav_info.wav_header
+    }
+
+    pub fn header_mut(&mut self) -> &mut WavHeader {
+        &mut self.wav_info.wav_header
+    }
+
+    #[allow(unused)]
+    pub fn encoding(&self) -> WavType {
+        self.wav_info.wav_type
     }
 
     pub fn sample_rate(&self) -> i32 {
@@ -148,8 +160,46 @@ where
     pub fn n_channels(&self) -> u16 {
         self.header().fmt_chunk.channels
     }
+
+    pub fn n_samples(&self) -> usize {
+        let (_, data_size_bytes) = self.header().data().into();
+        data_size_bytes as usize / std::mem::size_of::<T>()
+    }
+
+    pub fn duration(&self) -> u32 {
+        let data_size = self.header().data().size;
+
+        let sample_rate = self.sample_rate() as u32;
+        let n_channels = self.n_channels() as u32;
+        let bytes_per_sample = (self.header().fmt_chunk.bits_per_sample / 8) as u32;
+
+        data_size / (sample_rate * n_channels * bytes_per_sample)
+    }
+
+    pub fn wav_spec(&self) -> (i32, u16, u32) {
+        let sample_rate = self.sample_rate();
+        let n_channels = self.n_channels();
+        let duration = self.duration();
+        (sample_rate, n_channels, duration)
+    }
 }
 
+pub fn wav_spec<P: AsRef<Path>>(p: P) -> WaversResult<(i32, u16, u32, WavType)> {
+    let wav = Wav::<i16>::from_path(p)?;
+    let native_encoding = wav.wav_info.wav_type;
+    let (sr, nc, d) = wav.wav_spec();
+    Ok((sr, nc, d, native_encoding))
+}
+
+#[cfg(not(feature = "pyo3"))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WavInfo {
+    pub wav_type: WavType, // the type of the wav file
+    pub wav_header: WavHeader,
+}
+
+#[cfg(feature = "pyo3")]
+#[pyclass]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WavInfo {
     pub wav_type: WavType, // the type of the wav file
@@ -181,6 +231,16 @@ impl TryInto<WavType> for TypeId {
 }
 
 #[cfg(not(feature = "pyo3"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WavType {
+    Pcm16,
+    Pcm32,
+    Float32,
+    Float64,
+}
+
+#[cfg(feature = "pyo3")]
+#[pyclass]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WavType {
     Pcm16,
@@ -226,73 +286,51 @@ impl Into<(u16, u16, u16)> for WavType {
 }
 
 #[cfg(feature = "ndarray")]
-use crate::conversion::ndarray_conversion::{AsNdarray, IntoNdarray, IntoWav};
-#[cfg(feature = "ndarray")]
-use ndarray::{Array2, ArrayBase, CowArray, ShapeError};
+use crate::conversion::{AsNdarray, IntoNdarray};
 
 #[cfg(feature = "ndarray")]
-impl<T> IntoNdarray for Wav<T>
+impl<T: AudioSample> IntoNdarray for Wav<T>
 where
-    T: AudioSample,
-{
-    type Target = T;
-
-    fn into_ndarray(self) -> Result<Array2<Self::Target>, ShapeError> {
-        let n_channels = self.header.fmt_chunk.channels as usize;
-        let shape = (self.len() / n_channels, n_channels);
-        let copied_data = self.samples.as_ref();
-        let arr = ArrayBase::from(copied_data.to_owned());
-        arr.into_shape(shape)
-    }
-}
-
-#[cfg(feature = "ndarray")]
-impl<T> AsNdarray for Wav<T>
-where
-    T: AudioSample,
-{
-    type Target = T;
-
-    fn as_ndarray(&self) -> Result<CowArray<Self::Target, ndarray::Ix2>, ShapeError> {
-        let n_channels = self.header.fmt_chunk.channels as usize;
-        let shape = (self.len() / n_channels, n_channels);
-        let copied_data = &self.samples;
-        let arr = CowArray::from(copied_data);
-        arr.into_shape(shape)
-    }
-}
-
-#[cfg(feature = "ndarray")]
-impl<T> IntoWav for Array2<T>
-where
-    T: AudioSample + Debug + Copy + PartialEq,
     i16: ConvertTo<T>,
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
 {
     type Target = T;
-    fn into(self, sample_rate: i32) -> WaversResult<Wav<T>> {
-        let n_channels = self.shape()[0];
 
-        let samples: Samples<T> = Samples::from(self.into_raw_vec());
+    fn into_ndarray(mut self) -> WaversResult<Array2<Self::Target>> {
+        let n_channels = self.header().fmt_chunk.channels as usize;
 
-        let t_type = TypeId::of::<T>();
-        let header = {
-            if t_type == I16 {
-                WavHeader::new_header::<i16>(sample_rate, n_channels as u16, samples.len())?
-            } else if t_type == I32 {
-                WavHeader::new_header::<i32>(sample_rate, n_channels as u16, samples.len())?
-            } else if t_type == F32 {
-                WavHeader::new_header::<f32>(sample_rate, n_channels as u16, samples.len())?
-            } else if t_type == F64 {
-                WavHeader::new_header::<f64>(sample_rate, n_channels as u16, samples.len())?
-            } else {
-                return Err(WaversError::InvalidType(format!("{:?}", t_type)));
-            }
-        };
+        let copied_data: &[T] = &self.read()?.samples;
+        let length = copied_data.len();
+        let shape = (n_channels, length / n_channels);
 
-        Ok(Wav { header, samples })
+        let arr: Array2<T> = Array::from_shape_vec(shape, copied_data.to_vec())?;
+        Ok(arr)
+        // let arr = Array::from(copied_data);
+        // Ok(arr.into_shape(shape)?)
+    }
+}
+
+#[cfg(feature = "ndarray")]
+impl<T: AudioSample> AsNdarray for Wav<T>
+where
+    i16: ConvertTo<T>,
+    i32: ConvertTo<T>,
+    f32: ConvertTo<T>,
+    f64: ConvertTo<T>,
+{
+    type Target = T;
+
+    fn as_ndarray(&mut self) -> WaversResult<Array2<Self::Target>> {
+        let n_channels = self.header().fmt_chunk.channels as usize;
+        let copied_data: Box<[T]> = self.read()?.samples.to_owned();
+        let copied_data: &[T] = &copied_data;
+        let length = copied_data.len();
+
+        let shape = (n_channels, length / n_channels);
+        let arr: Array2<T> = Array::from_shape_vec(shape, copied_data.to_vec())?;
+        Ok(arr)
     }
 }
 
@@ -476,8 +514,11 @@ where
 #[cfg(test)]
 mod core_tests {
     use super::*;
-    use crate::conversion::ConvertSlice;
-    use crate::{read, write};
+
+    #[cfg(feature = "ndarray")]
+    use crate::IntoNdarray;
+
+    use crate::read;
 
     use approx_eq::assert_approx_eq;
     use std::{fs::File, io::BufRead, path::Path, str::FromStr};
@@ -489,6 +530,20 @@ mod core_tests {
     const ONE_CHANNEL_EXPECTED_F32: &str = "./test_resources/one_channel_f32.txt";
 
     const TEST_OUTPUT: &str = "./test_resources/tmp/";
+
+    #[test]
+    pub fn duration_one_channel() {
+        let wav: Wav<i16> = Wav::from_path(ONE_CHANNEL_WAV_I16).unwrap();
+        let duration = wav.duration();
+        assert_eq!(duration, 10, "Expected duration of 10 seconds");
+    }
+
+    #[test]
+    pub fn duration_two_channel() {
+        let wav: Wav<i16> = Wav::from_path(TWO_CHANNEL_WAV_I16).unwrap();
+        let duration = wav.duration();
+        assert_eq!(duration, 10, "Expected duration of 10 seconds");
+    }
 
     #[test]
     fn i16_i32_convert() {
@@ -510,7 +565,9 @@ mod core_tests {
     #[cfg(feature = "ndarray")]
     #[test]
     fn wav_as_ndarray() {
-        let wav = Wav::<i16>::read(ONE_CHANNEL_WAV_I16).unwrap();
+        let wav: Wav<i16> =
+            Wav::<i16>::from_path(ONE_CHANNEL_WAV_I16).expect("Failed to read file");
+
         let expected_wav: Vec<i16> = read_text_to_vec(Path::new(ONE_CHANNEL_EXPECTED_I16)).unwrap();
 
         let arr = wav.into_ndarray().unwrap();
@@ -523,7 +580,8 @@ mod core_tests {
     #[cfg(feature = "ndarray")]
     #[test]
     fn two_channel_as_ndarray() {
-        let wav: Wav<i16> = Wav::<i16>::read(Path::new(TWO_CHANNEL_WAV_I16)).unwrap();
+        let wav: Wav<i16> =
+            Wav::<i16>::from_path(TWO_CHANNEL_WAV_I16).expect("Failed to open file");
         let expected_wav: Vec<i16> = read_text_to_vec(Path::new(ONE_CHANNEL_EXPECTED_I16)).unwrap();
         let mut new_expected = Vec::with_capacity(expected_wav.len() * 2);
         for sample in expected_wav {

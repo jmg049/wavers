@@ -12,12 +12,12 @@ use crate::{
     error::{WaversError, WaversResult},
 };
 
-pub const RIFF: [u8; 4] = *b"RIFF";
+const RIFF: [u8; 4] = *b"RIFF";
 pub const DATA: [u8; 4] = *b"data";
-pub const WAVE: [u8; 4] = *b"WAVE";
-pub const FMT: [u8; 4] = *b"fmt ";
+const WAVE: [u8; 4] = *b"WAVE";
+const FMT: [u8; 4] = *b"fmt ";
 
-pub const RIFF_SIZE: usize = 12;
+const RIFF_SIZE: usize = 12;
 const FMT_SIZE: usize = 16;
 
 /// A struct used to store the offset and size of a chunk
@@ -109,7 +109,7 @@ impl WavHeader {
         let fmt_chunk = FmtChunk::new(format, n_channels, sample_rate, bits_per_sample);
         let mut header_info = HashMap::new();
 
-        let data_size_bytes = n_samples * bits_per_sample as usize;
+        let data_size_bytes = n_samples * (bits_per_sample / 8) as usize;
         let file_size_bytes = data_size_bytes + 44; // 4 bytes for RIFF + 4 bytes for size + 4 bytes for WAVE + 4 bytes for FMT  + 4 bytes for fmt size + 16 bytes for fmt chunk + 4 bytes for DATA + 4 bytes for data size + data_size_bytes
 
         header_info.insert(RIFF.into(), HeaderChunkInfo::new(0, RIFF_SIZE as u32));
@@ -190,6 +190,32 @@ impl Display for ChunkIdentifier {
     }
 }
 
+///
+/// A struct for storing the necessary format information about a wav file.
+///
+/// In total the struct is 16 bytes
+///
+#[cfg(not(feature = "pyo3"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub struct FmtChunk {
+    /// Format of the audio data. 1 for PCM, 3 for IEEE float.
+    pub format: u16,
+    /// Number of channels in the audio data.
+    pub channels: u16,
+    /// Sample rate of the audio data.
+    pub sample_rate: i32,
+    /// Byte rate of the audio data.
+    pub byte_rate: i32,
+    /// Block align of the audio data.
+    pub block_align: u16,
+    /// Bits per sample of the audio data.
+    pub bits_per_sample: u16,
+}
+
+/// A struct for storing the necessary format information about a wav file.
+/// This version is compiled when using the pyo3 feature.
+/// In total the struct is 16 bytes
 #[cfg(feature = "pyo3")]
 #[pyclass]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -212,29 +238,6 @@ pub struct FmtChunk {
     pub block_align: u16,
     /// Bits per sample of the audio data.
     #[pyo3(get)]
-    pub bits_per_sample: u16,
-}
-
-///
-/// A struct for storing the necessary format information about a wav file.
-///
-/// In total the struct is 16 bytes
-///
-#[cfg(not(feature = "pyo3"))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(C)]
-pub struct FmtChunk {
-    /// Format of the audio data. 1 for PCM, 3 for IEEE float.
-    pub format: u16,
-    /// Number of channels in the audio data.
-    pub channels: u16,
-    /// Sample rate of the audio data.
-    pub sample_rate: i32,
-    /// Byte rate of the audio data.
-    pub byte_rate: i32,
-    /// Block align of the audio data.
-    pub block_align: u16,
-    /// Bits per sample of the audio data.
     pub bits_per_sample: u16,
 }
 
@@ -290,7 +293,7 @@ impl Into<FmtChunk> for [u8; FMT_SIZE] {
 
 /// Reads the header of a wav file and returns a tuple containing the header information and the wav encoding.
 /// Mostly for convenience, but can also be used to inspect a wav file without reading the data.
-pub fn read_header(readable: &mut Box<dyn ReadSeek>) -> WaversResult<WavInfo> {
+pub(crate) fn read_header(readable: &mut Box<dyn ReadSeek>) -> WaversResult<WavInfo> {
     // reset the buffer reader to the start of the file
     readable.seek(SeekFrom::Start(0))?;
 

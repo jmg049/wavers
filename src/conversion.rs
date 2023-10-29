@@ -263,11 +263,11 @@ mod conversion_tests {
 #[cfg(feature = "ndarray")]
 pub trait IntoNdarray {
     type Target: AudioSample;
-    fn into_ndarray(self) -> crate::WaversResult<ndarray::Array2<Self::Target>>;
+    fn into_ndarray(self) -> crate::WaversResult<(ndarray::Array2<Self::Target>, i32)>;
 }
 
 #[cfg(feature = "ndarray")]
 pub trait AsNdarray {
     type Target: AudioSample;
-    fn as_ndarray(&mut self) -> crate::WaversResult<ndarray::Array2<Self::Target>>;
+    fn as_ndarray(&mut self) -> crate::WaversResult<(ndarray::Array2<Self::Target>, i32)>;
 }

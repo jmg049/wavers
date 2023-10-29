@@ -12,20 +12,47 @@ use bytemuck::cast_slice;
 #[cfg(feature = "ndarray")]
 use ndarray::{Array, Array2};
 
+#[cfg(feature = "pyo3")]
+use pyo3::prelude::*;
+
 use crate::conversion::ConvertSlice;
 
 use crate::conversion::{AudioSample, ConvertTo};
 use crate::error::{WaversError, WaversResult};
 use crate::header::{read_header, WavHeader, DATA};
 
-#[cfg(feature = "pyo3")]
-use pyo3::prelude::*;
-
+/// Trait used to indicate that the implementing type can be read and seeked through.
+/// It is just a marker to allow for types that implement Read and Seek to be used.
+///
+/// For example: ``std::fs::File``, ``std::io::BufReader<T: ReadSeek>``
 pub trait ReadSeek: Read + Seek {}
 
 impl ReadSeek for std::fs::File {}
 impl<T: ReadSeek> ReadSeek for std::io::BufReader<T> {}
 
+/// Represents a wav file. It contains the header information and a reader (essentially a file pointer of some type).
+/// Upon creation, does not read the entire file into memory, but only reads the header information.
+/// The type T is the type that you want to read the samples as, NOT the type of the samples in the file.
+///
+/// Example
+/// ```
+/// use wavers::Wav;
+///
+/// fn main() {
+///     // Creates a Wav struct which will read as samples as i16
+///     let mut wav_i16: Wav<i16> = Wav::from_path("./test_resources/one_channel_i16.wav").unwrap();
+///
+///     // Creates a new Wav struct, using a file that we know is encoded as PCM_16, but which will read the samplea as 32-bit floats.
+///     let mut wav_f32: Wav<f32> = Wav::from_path("./test_resources/one_channel_i16.wav").unwrap();
+///
+///     // We can then access the audio samples by calling read on the Wav struct. Needs to be mut as we update the reader position.
+///     let samples_i16: &[i16] = &wav_i16.read().unwrap();
+///
+///     let samples_f32: &[f32] = &wav_f32.read().unwrap();
+/// }
+///
+/// ```
+///
 pub struct Wav<T: AudioSample>
 where
     i16: ConvertTo<T>,
@@ -53,6 +80,21 @@ where
     Box<[f32]>: ConvertSlice<T>,
     Box<[f64]>: ConvertSlice<T>,
 {
+    /// Creates a new Wav struct from a reader that implements Read and Seek.
+    ///
+    /// Returns a result with the Wav struct if successful, or an error if not.
+    ///
+    /// # Example
+    /// ```
+    /// use wavers::Wav;
+    /// use std::fs::File;
+    ///
+    /// fn main() {
+    ///     let fp: File = File::open("./test_resources/one_channel_i16.wav").unwrap();
+    ///     let wav = Wav::<i16>::new(Box::new(fp)).unwrap();
+    /// }
+    /// ```
+    ///
     pub fn new(mut reader: Box<dyn ReadSeek>) -> WaversResult<Self> {
         let wav_info = read_header(&mut reader)?;
 
@@ -74,6 +116,54 @@ where
         Self::new(buf_reader)
     }
 
+    /// Convenience function which creates a new Wav struct from anything that can be turned into a Path reference.
+    /// This will open the file and create a BufReader from it.
+    ///
+    /// Returns a result with the Wav struct if successful, or an error if not.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use wavers::Wav;
+    ///
+    /// fn main() {
+    ///    let wav = Wav::<i16>::from_path("/path/to/wav.wav").unwrap();
+    /// }
+    /// ```
+    pub fn from_path<P: AsRef<Path>>(path: P) -> WaversResult<Self> {
+        let f = std::fs::File::open(path)?;
+        let buf_reader: Box<dyn ReadSeek> = Box::new(std::io::BufReader::new(f));
+        Self::new(buf_reader)
+    }
+
+    pub fn convert<F: AudioSample>(self) -> WaversResult<Wav<F>>
+    where
+        T: ConvertTo<F>,
+        i16: ConvertTo<F>,
+        i32: ConvertTo<F>,
+        f32: ConvertTo<F>,
+        f64: ConvertTo<F>,
+    {
+        let sr = self.sample_rate();
+        let n_channels = self.n_channels();
+        let n_samples = self.n_samples();
+        let new_header = WavHeader::new_header::<F>(sr, n_channels, n_samples)?;
+        println!("{:#?}", new_header);
+        let new_type: WavType = TypeId::of::<F>().try_into()?;
+        let new_info = WavInfo {
+            wav_type: new_type,
+            wav_header: new_header,
+        };
+        println!("samples = {}", n_samples);
+        Ok(Wav::<F> {
+            _phantom: std::marker::PhantomData,
+            reader: self.reader,
+            wav_info: new_info,
+        })
+    }
+
+    /// Function used to read the audio samples contained with the audio file.
+    /// Reads the entire file into memory and returns a ``Samples`` struct or an error.
+    /// The ``Samples`` struct contains a boxed slice of the samples.
     #[inline(always)]
     pub fn read(&mut self) -> WaversResult<Samples<T>> {
         let (_, data_size_bytes) = self.header().data().into();
@@ -81,10 +171,16 @@ where
         self.read_samples(n_samples)
     }
 
+    ///
+    /// Function used to read a specified number of samples from the audio file.
+    /// Reads the specified number of samples into memory and returns a ``Samples`` struct or an error.
+    /// The file pointer will be updated to the position after the read samples. Therefore reading can be resumed from the current position.
     #[inline(always)]
     pub fn read_samples(&mut self, n_samples: usize) -> WaversResult<Samples<T>> {
         let n_bytes = n_samples * std::mem::size_of::<T>();
-
+        println!("samples n_bytes: {}", n_bytes);
+        println!("n_bytes = {}", n_bytes);
+        println!("Size of T: {}", std::mem::size_of::<T>());
         let mut samples = alloc_box_buffer(n_bytes);
         self.reader.read_exact(&mut samples)?;
 
@@ -115,6 +211,11 @@ where
         }
     }
 
+    ///
+    /// Writes the current data of the Wav struct to a file.
+    /// The type ``F`` is the type that the samples will be written as. This will be reflected in the encoding of the file in the Wav Header.
+    ///
+    /// Returns a result with nothing if successful, or an error if not.
     #[inline(always)]
     pub fn write<F: AudioSample, P: AsRef<Path>>(&mut self, p: P) -> WaversResult<()>
     where
@@ -140,32 +241,38 @@ where
         Ok(())
     }
 
+    /// Convenience function for accessing the header of the Wav file
     pub fn header(&self) -> &WavHeader {
         &self.wav_info.wav_header
     }
 
+    /// Convenience function for accessing (and potentially mutating) the header of the Wav file
     pub fn header_mut(&mut self) -> &mut WavHeader {
         &mut self.wav_info.wav_header
     }
 
-    #[allow(unused)]
+    /// Convenience function for accessing the encoding of the Wav file
     pub fn encoding(&self) -> WavType {
         self.wav_info.wav_type
     }
 
+    /// Convenience function for accessing the sample rate of the Wav file
     pub fn sample_rate(&self) -> i32 {
         self.header().fmt_chunk.sample_rate
     }
 
+    /// Convenience function for accessing the number of channels of the Wav file
     pub fn n_channels(&self) -> u16 {
         self.header().fmt_chunk.channels
     }
 
+    /// Convenience function for accessing the number of samples of the Wav file
     pub fn n_samples(&self) -> usize {
         let (_, data_size_bytes) = self.header().data().into();
         data_size_bytes as usize / std::mem::size_of::<T>()
     }
 
+    /// Convenience function for calculating the duration of the Wav file
     pub fn duration(&self) -> u32 {
         let data_size = self.header().data().size;
 
@@ -176,6 +283,7 @@ where
         data_size / (sample_rate * n_channels * bytes_per_sample)
     }
 
+    /// Convenience function for accessing the sample rate, number of channels and duration of the Wav file
     pub fn wav_spec(&self) -> (i32, u16, u32) {
         let sample_rate = self.sample_rate();
         let n_channels = self.n_channels();
@@ -184,6 +292,7 @@ where
     }
 }
 
+/// Convenience function for accessing the sample rate, number of channels, duration and encoding of the Wav file without having to create one.
 pub fn wav_spec<P: AsRef<Path>>(p: P) -> WaversResult<(i32, u16, u32, WavType)> {
     let wav = Wav::<i16>::from_path(p)?;
     let native_encoding = wav.wav_info.wav_type;
@@ -191,6 +300,7 @@ pub fn wav_spec<P: AsRef<Path>>(p: P) -> WaversResult<(i32, u16, u32, WavType)> 
     Ok((sr, nc, d, native_encoding))
 }
 
+/// Struct containing metadata of a Wav file, i.e. it's encoding and its header
 #[cfg(not(feature = "pyo3"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WavInfo {
@@ -198,6 +308,8 @@ pub struct WavInfo {
     pub wav_header: WavHeader,
 }
 
+/// Struct containing metadata of a Wav file, i.e. it's encoding and its header
+/// This struct is used when the pyo3 feature is enabled.
 #[cfg(feature = "pyo3")]
 #[pyclass]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -212,6 +324,7 @@ impl Into<(WavHeader, WavType)> for WavInfo {
     }
 }
 
+/// Used to convert a TypeId into an encoding.
 impl TryInto<WavType> for TypeId {
     type Error = WaversError;
 
@@ -230,6 +343,7 @@ impl TryInto<WavType> for TypeId {
     }
 }
 
+/// Enum which represents the encoding of a Wav file.
 #[cfg(not(feature = "pyo3"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WavType {
@@ -239,6 +353,8 @@ pub enum WavType {
     Float64,
 }
 
+/// Enum which represents the encoding of a Wav file.
+/// This enum is used when the pyo3 feature is enabled.
 #[cfg(feature = "pyo3")]
 #[pyclass]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -288,9 +404,21 @@ impl Into<(u16, u16, u16)> for WavType {
 #[cfg(feature = "ndarray")]
 use crate::conversion::{AsNdarray, IntoNdarray};
 
+/// Implementation of the IntoNdarray trait for the Wav struct.
+/// This function consumes the Wav struct and returns an ndarray and the sample rate.
+///
+/// Reads the Wav file and converts it to an ndarray.
+/// The functionality is associated with the struct rather than
+/// an individual function as the Wav struct contains channel
+/// information which would otherwise have to be specified.
 #[cfg(feature = "ndarray")]
 impl<T: AudioSample> IntoNdarray for Wav<T>
+impl<T: AudioSample> IntoNdarray for Wav<T>
 where
+    i16: ConvertTo<T>,
+    i32: ConvertTo<T>,
+    f32: ConvertTo<T>,
+    f64: ConvertTo<T>,
     i16: ConvertTo<T>,
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
@@ -298,21 +426,28 @@ where
 {
     type Target = T;
 
-    fn into_ndarray(mut self) -> WaversResult<Array2<Self::Target>> {
-        let n_channels = self.header().fmt_chunk.channels as usize;
+    fn into_ndarray(mut self) -> WaversResult<(Array2<Self::Target>, i32)> {
+        let n_channels = self.n_channels() as usize;
+        let sr = self.sample_rate();
 
         let copied_data: &[T] = &self.read()?.samples;
         let length = copied_data.len();
         let shape = (n_channels, length / n_channels);
 
         let arr: Array2<T> = Array::from_shape_vec(shape, copied_data.to_vec())?;
-        Ok(arr)
-        // let arr = Array::from(copied_data);
-        // Ok(arr.into_shape(shape)?)
+        Ok((arr, sr))
     }
 }
 
+/// Implementation of the AsNdarray trait for the Wav struct.
+/// This function do not consume the Wav struct and returns an ndarray and the sample rate.
+///
+/// Reads the Wav file and converts it to an ndarray.
+/// The functionality is associated with the struct rather than
+/// an individual function as the Wav struct contains channel
+/// information which would otherwise have to be specified.
 #[cfg(feature = "ndarray")]
+impl<T: AudioSample> AsNdarray for Wav<T>
 impl<T: AudioSample> AsNdarray for Wav<T>
 where
     i16: ConvertTo<T>,
@@ -322,15 +457,16 @@ where
 {
     type Target = T;
 
-    fn as_ndarray(&mut self) -> WaversResult<Array2<Self::Target>> {
-        let n_channels = self.header().fmt_chunk.channels as usize;
+    fn as_ndarray(&mut self) -> WaversResult<(Array2<Self::Target>, i32)> {
+        let n_channels = self.n_channels() as usize;
+        let sr = self.sample_rate();
         let copied_data: Box<[T]> = self.read()?.samples.to_owned();
         let copied_data: &[T] = &copied_data;
         let length = copied_data.len();
 
         let shape = (n_channels, length / n_channels);
         let arr: Array2<T> = Array::from_shape_vec(shape, copied_data.to_vec())?;
-        Ok(arr)
+        Ok((arr, sr))
     }
 }
 
@@ -479,7 +615,8 @@ impl Samples<i32> {}
 impl Samples<f32> {}
 impl Samples<f64> {}
 
-pub fn alloc_box_buffer(len: usize) -> Box<[u8]> {
+/// Function to create a fixed-size heap allocated block of bytes.
+pub(crate) fn alloc_box_buffer(len: usize) -> Box<[u8]> {
     if len == 0 {
         return <Box<[u8]>>::default();
     }
@@ -493,6 +630,7 @@ pub fn alloc_box_buffer(len: usize) -> Box<[u8]> {
     unsafe { Box::from_raw(slice_ptr) }
 }
 
+/// Function to create a fixed-size heap allocated block of samples (sizeof::<T> * len).
 pub(crate) fn alloc_sample_buffer<T>(len: usize) -> Box<[T]>
 where
     T: AudioSample + Copy + Debug,
@@ -520,6 +658,11 @@ mod core_tests {
 
     use crate::read;
 
+    #[cfg(feature = "ndarray")]
+    use crate::IntoNdarray;
+
+    use crate::read;
+
     use approx_eq::assert_approx_eq;
     use std::{fs::File, io::BufRead, path::Path, str::FromStr};
 
@@ -530,6 +673,20 @@ mod core_tests {
     const ONE_CHANNEL_EXPECTED_F32: &str = "./test_resources/one_channel_f32.txt";
 
     const TEST_OUTPUT: &str = "./test_resources/tmp/";
+
+    #[test]
+    pub fn duration_one_channel() {
+        let wav: Wav<i16> = Wav::from_path(ONE_CHANNEL_WAV_I16).unwrap();
+        let duration = wav.duration();
+        assert_eq!(duration, 10, "Expected duration of 10 seconds");
+    }
+
+    #[test]
+    pub fn duration_two_channel() {
+        let wav: Wav<i16> = Wav::from_path(TWO_CHANNEL_WAV_I16).unwrap();
+        let duration = wav.duration();
+        assert_eq!(duration, 10, "Expected duration of 10 seconds");
+    }
 
     #[test]
     pub fn duration_one_channel() {
@@ -568,9 +725,13 @@ mod core_tests {
         let wav: Wav<i16> =
             Wav::<i16>::from_path(ONE_CHANNEL_WAV_I16).expect("Failed to read file");
 
+        let wav: Wav<i16> =
+            Wav::<i16>::from_path(ONE_CHANNEL_WAV_I16).expect("Failed to read file");
+
         let expected_wav: Vec<i16> = read_text_to_vec(Path::new(ONE_CHANNEL_EXPECTED_I16)).unwrap();
 
-        let arr = wav.into_ndarray().unwrap();
+        let (arr, sr) = wav.into_ndarray().unwrap();
+        assert_eq!(sr, 16000, "sr != 16000");
         assert_eq!(arr.shape()[0], 1, "Expected 1 channels");
         for (expected, actual) in expected_wav.iter().zip(arr) {
             assert_eq!(*expected, actual, "{} != {}", expected, actual);
@@ -582,6 +743,8 @@ mod core_tests {
     fn two_channel_as_ndarray() {
         let wav: Wav<i16> =
             Wav::<i16>::from_path(TWO_CHANNEL_WAV_I16).expect("Failed to open file");
+        let wav: Wav<i16> =
+            Wav::<i16>::from_path(TWO_CHANNEL_WAV_I16).expect("Failed to open file");
         let expected_wav: Vec<i16> = read_text_to_vec(Path::new(ONE_CHANNEL_EXPECTED_I16)).unwrap();
         let mut new_expected = Vec::with_capacity(expected_wav.len() * 2);
         for sample in expected_wav {
@@ -591,7 +754,9 @@ mod core_tests {
 
         let expected_wav = new_expected;
 
-        let two_channel_arr = wav.into_ndarray().unwrap();
+        let (two_channel_arr, sr) = wav.into_ndarray().unwrap();
+        assert_eq!(sr, 16000, "sr != 16000");
+
         assert_eq!(two_channel_arr.shape()[0], 2, "Expected 2 channels");
         for (expected, actual) in std::iter::zip(expected_wav, two_channel_arr) {
             assert_eq!(expected, actual, "{} != {}", expected, actual);
@@ -749,6 +914,22 @@ mod core_tests {
 
         for (expected, actual) in expected_samples.iter().zip(wav.read().unwrap().as_ref()) {
             assert_eq!(*expected, *actual, "{} != {}", expected, actual);
+        }
+    }
+
+    #[test]
+    fn can_convert_wav() {
+        let p: &Path = Path::new(ONE_CHANNEL_EXPECTED_F32);
+        let expected: Vec<f32> = read_text_to_vec(p).unwrap();
+
+        let wav: Wav<i16> = Wav::from_path(ONE_CHANNEL_WAV_I16).unwrap();
+        println!("Wav i16 samples: {}", wav.n_samples());
+
+        let mut wav: Wav<f32> = wav.convert().unwrap();
+        let actual: &[f32] = &wav.read().expect("Failed to read samples");
+        println!("Read succes");
+        for (exp, act) in expected.iter().zip(actual) {
+            assert_approx_eq!(*exp as f64, *act as f64);
         }
     }
 

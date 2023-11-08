@@ -210,8 +210,9 @@ where
 
     /// Returns the number of samples in the wav file.
     pub fn n_samples(&self) -> usize {
-        let (_, data_size_bytes) = self.header().data().into();
-        data_size_bytes as usize / std::mem::size_of::<T>()
+        let (_, native_data_size_bytes) = self.header().data().into();
+        let size_of_native_bytes = self.header().fmt_chunk.bits_per_sample as usize / 8;
+        native_data_size_bytes as usize / size_of_native_bytes
     }
 
     /// Returns the duration of the wav file in seconds.
@@ -621,6 +622,15 @@ mod core_tests {
         assert_eq!(duration, 10, "Expected duration of 10 seconds");
     }
 
+    /// Test that the number of samples is correct after converting.
+    /// The wav file used is encoded as PCM_16 and has 2048 samples
+    /// Comes from https://github.com/jmg049/wavers/issues/9
+    #[test]
+    pub fn n_samples_after_convert() {
+        let wav: Wav<f32> = Wav::from_path("test_resources/n_samples_test.wav").unwrap();
+        assert_eq!(wav.n_samples(), 2048, "Expected 2048 samples");
+    }
+
     #[test]
     fn i16_i32_convert() {
         let mut wav: Wav<i32> = Wav::from_path(ONE_CHANNEL_WAV_I16).unwrap();
@@ -632,6 +642,12 @@ mod core_tests {
                 .unwrap()
                 .read()
                 .unwrap();
+
+        assert_eq!(
+            expected_i32_samples.len(),
+            wav.n_samples(),
+            "Lengths not equal"
+        );
 
         for (expected, actual) in expected_i32_samples.iter().zip(wav_i32.iter()) {
             assert_eq!(*expected, *actual, "{} != {}", expected, actual);
@@ -706,6 +722,8 @@ mod core_tests {
 
         let mut wav: Wav<f32> = Wav::from_path(ONE_CHANNEL_WAV_I16).unwrap();
         let samples: &[f32] = &wav.read().unwrap();
+
+        assert_eq!(wav.n_samples(), expected_samples.len(), "Lengths not equal");
         for (expected, actual) in expected_samples.iter().zip(samples) {
             assert_approx_eq!(*expected as f64, *actual as f64, 1e-4);
         }
@@ -727,6 +745,7 @@ mod core_tests {
         let expected_samples =
             read_text_to_vec::<f32>(Path::new(ONE_CHANNEL_EXPECTED_F32)).unwrap();
 
+        assert_eq!(wav.n_samples(), expected_samples.len(), "Lengths not equal");
         for (expected, actual) in expected_samples.iter().zip(actual_samples) {
             assert_approx_eq!(*expected as f64, *actual as f64, 1e-4);
         }
@@ -745,7 +764,7 @@ mod core_tests {
         }
 
         let expected_samples = new_expected;
-
+        assert_eq!(wav.n_samples(), expected_samples.len(), "Lengths not equal");
         for (expected, actual) in expected_samples.iter().zip(wav.read().unwrap().as_ref()) {
             assert_eq!(*expected, *actual, "{} != {}", expected, actual);
         }

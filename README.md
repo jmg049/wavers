@@ -45,7 +45,7 @@
 ---
 
 # Getting Started
-This sections provides a quick overview of the functionality offered by WaveRs to help you get started quickly. WaveRs allows the user to read, write and perform conversions between different types of sampled audio, currently, ``i16``, ``i32``, ``f32`` and ``f64``, but ``i24`` in future.
+This sections provides a quick overview of the functionality offered by WaveRs to help you get started quickly. WaveRs allows the user to read, write and perform conversions between different types of sampled audio, currently, ``i16``, ``i32``, ``f32`` and ``f64``. There is now **experimental** support for``i24`` now.
 
 For more details on the project and wav files see the [WaveRs Project](#the-wavers-project) section below. For more detailed information on the functionality offered by WaveRs see the [the docs](https://docs.rs/wavers).
 

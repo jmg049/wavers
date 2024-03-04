@@ -17,6 +17,7 @@ use crate::conversion::ConvertSlice;
 use crate::conversion::{AudioSample, ConvertTo};
 use crate::error::{WaversError, WaversResult};
 use crate::header::{read_header, WavHeader, DATA};
+use crate::i24;
 
 #[cfg(feature = "pyo3")]
 use pyo3::prelude::*;
@@ -35,10 +36,12 @@ impl<T: ReadSeek> ReadSeek for std::io::BufReader<T> {}
 pub struct Wav<T: AudioSample>
 where
     i16: ConvertTo<T>,
+    i24: ConvertTo<T>,
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
     Box<[i16]>: ConvertSlice<T>,
+    Box<[i24]>: ConvertSlice<T>,
     Box<[i32]>: ConvertSlice<T>,
     Box<[f32]>: ConvertSlice<T>,
     Box<[f64]>: ConvertSlice<T>,
@@ -51,10 +54,12 @@ where
 impl<T: AudioSample> Wav<T>
 where
     i16: ConvertTo<T>,
+    i24: ConvertTo<T>,
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
     Box<[i16]>: ConvertSlice<T>,
+    Box<[i24]>: ConvertSlice<T>,
     Box<[i32]>: ConvertSlice<T>,
     Box<[f32]>: ConvertSlice<T>,
     Box<[f64]>: ConvertSlice<T>,
@@ -124,9 +129,9 @@ where
     #[inline(always)]
     pub fn read_samples(&mut self, n_samples: usize) -> WaversResult<Samples<T>> {
         let native_type = self.wav_info.wav_type;
+
         let native_size_bytes: usize = native_type.into();
         let n_native_bytes: usize = n_samples * native_size_bytes;
-        // let n_bytes = n_samples * std::mem::size_of::<T>();
 
         let mut samples = alloc_box_buffer(n_native_bytes);
         self.reader.read_exact(&mut samples)?;
@@ -134,6 +139,7 @@ where
         let wav_type_from_file = self.wav_info.wav_type;
 
         let desired_type: WavType = TypeId::of::<T>().try_into()?;
+
         if wav_type_from_file == desired_type {
             return Ok(Samples::from(cast_slice::<u8, T>(&samples)));
         }
@@ -141,6 +147,11 @@ where
         match wav_type_from_file {
             WavType::Pcm16 => {
                 let samples: &[i16] = cast_slice::<u8, i16>(&samples);
+                Ok(Samples::from(samples).convert())
+            }
+            WavType::Pcm24 => {
+                // Read the samples as i32 first and then convert
+                let samples: &[i24] = cast_slice::<u8, i24>(&samples);
                 Ok(Samples::from(samples).convert())
             }
             WavType::Pcm32 => {
@@ -272,6 +283,8 @@ impl TryInto<WavType> for TypeId {
     fn try_into(self) -> Result<WavType, Self::Error> {
         if self == TypeId::of::<i16>() {
             Ok(WavType::Pcm16)
+        } else if self == TypeId::of::<i24>() {
+            Ok(WavType::Pcm24)
         } else if self == TypeId::of::<i32>() {
             Ok(WavType::Pcm32)
         } else if self == TypeId::of::<f32>() {
@@ -288,6 +301,7 @@ impl Into<usize> for WavType {
     fn into(self) -> usize {
         match self {
             WavType::Pcm16 => std::mem::size_of::<i16>(),
+            WavType::Pcm24 => std::mem::size_of::<i24>(),
             WavType::Pcm32 => std::mem::size_of::<i32>(),
             WavType::Float32 => std::mem::size_of::<f32>(),
             WavType::Float64 => std::mem::size_of::<f64>(),
@@ -300,6 +314,7 @@ impl Into<usize> for WavType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WavType {
     Pcm16,
+    Pcm24,
     Pcm32,
     Float32,
     Float64,
@@ -312,6 +327,7 @@ pub enum WavType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WavType {
     Pcm16,
+    Pcm24,
     Pcm32,
     Float32,
     Float64,
@@ -321,6 +337,7 @@ impl Display for WavType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             WavType::Pcm16 => write!(f, "PCM16"),
+            WavType::Pcm24 => write!(f, "PCM24"),
             WavType::Pcm32 => write!(f, "PCM32"),
             WavType::Float32 => write!(f, "Float32"),
             WavType::Float64 => write!(f, "Float64"),
@@ -334,10 +351,19 @@ impl TryFrom<(u16, u16)> for WavType {
     fn try_from(value: (u16, u16)) -> Result<Self, Self::Error> {
         Ok(match value {
             (1, 16) => WavType::Pcm16,
+            (1, 24) => WavType::Pcm24,
             (1, 32) => WavType::Pcm32,
             (3, 32) => WavType::Float32,
             (3, 64) => WavType::Float64,
-            _ => return Err(WaversError::InvalidType("Invalid wav type".into())),
+            _ => {
+                return Err(WaversError::InvalidType(
+                    format!(
+                        "Invalid wav type. Unsupported type {}, and number of bytes per samples {}",
+                        value.0, value.1
+                    )
+                    .into(),
+                ))
+            }
         })
     }
 }
@@ -346,6 +372,7 @@ impl Into<TypeId> for WavType {
     fn into(self) -> TypeId {
         match self {
             WavType::Pcm16 => TypeId::of::<i16>(),
+            WavType::Pcm24 => TypeId::of::<i24>(),
             WavType::Pcm32 => TypeId::of::<i32>(),
             WavType::Float32 => TypeId::of::<f32>(),
             WavType::Float64 => TypeId::of::<f64>(),
@@ -357,6 +384,7 @@ impl Into<(u16, u16, u16)> for WavType {
     fn into(self) -> (u16, u16, u16) {
         match self {
             WavType::Pcm16 => (1, 16, 2),
+            WavType::Pcm24 => (1, 24, 3),
             WavType::Pcm32 => (1, 32, 4),
             WavType::Float32 => (3, 32, 4),
             WavType::Float64 => (3, 64, 8),
@@ -371,6 +399,7 @@ use crate::conversion::{AsNdarray, IntoNdarray};
 impl<T: AudioSample> IntoNdarray for Wav<T>
 where
     i16: ConvertTo<T>,
+    i24: ConvertTo<T>,
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
@@ -393,6 +422,7 @@ where
 impl<T: AudioSample> AsNdarray for Wav<T>
 where
     i16: ConvertTo<T>,
+    i24: ConvertTo<T>,
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
@@ -552,6 +582,7 @@ where
 }
 
 impl Samples<i16> {}
+impl Samples<i24> {}
 impl Samples<i32> {}
 impl Samples<f32> {}
 impl Samples<f64> {}
@@ -602,6 +633,9 @@ mod core_tests {
 
     const ONE_CHANNEL_WAV_I16: &str = "./test_resources/one_channel_i16.wav";
     const TWO_CHANNEL_WAV_I16: &str = "./test_resources/two_channel_i16.wav";
+
+    const ONE_CHANNEL_WAV_I24: &str = "./test_resources/one_channel_i24.wav";
+    const ONE_CHANNEL_EXPECTED_I24: &str = "./test_resources/one_channel_i24.txt";
 
     const ONE_CHANNEL_EXPECTED_I16: &str = "./test_resources/one_channel_i16.txt";
     const ONE_CHANNEL_EXPECTED_F32: &str = "./test_resources/one_channel_f32.txt";
@@ -785,6 +819,49 @@ mod core_tests {
 
         let all_samples = wav.read().unwrap();
         assert_eq!(all_samples.len(), wav.n_samples());
+    }
+
+    #[test]
+    fn read_i24_correctly() {
+        let mut wav: Wav<i24> = Wav::from_path(ONE_CHANNEL_WAV_I24).expect("Failed to open file");
+        let samples: &[i24] = &wav.read().unwrap();
+
+        // Expected values have been coming from SoundFile in Python as it is a tried and tested library
+        // However, the values were written using Numpy and Numpy doesn't support i24 so it writes it as an i32
+        // Hence the need to convert here. Relies on the assumption that the i24 conversion functions are correct.
+        let expected_samples: Vec<i32> =
+            read_text_to_vec(Path::new(ONE_CHANNEL_EXPECTED_I24)).unwrap();
+        let expected_samples: Box<[i32]> = expected_samples.into_boxed_slice();
+        let expected_samples: Box<[i24]> = expected_samples.convert_slice();
+
+        assert_eq!(samples.len(), expected_samples.len(), "Lengths not equal");
+
+        for (idx, (expected, actual)) in expected_samples.iter().zip(samples).enumerate() {
+            assert_eq!(*expected, *actual, "{} != {} at {}", expected, actual, idx);
+        }
+    }
+
+    #[test]
+    fn write_i24_correctly() {
+        let mut wav: Wav<i16> = Wav::from_path(ONE_CHANNEL_WAV_I16).unwrap();
+        let out_fp = format!("{}{}", TEST_OUTPUT, "write_i24_correctly.wav");
+        wav.write::<i24, _>(Path::new(&out_fp)).unwrap();
+
+        let mut wav: Wav<i24> = Wav::from_path(&out_fp).unwrap();
+        let samples: &[i24] = &wav.read().unwrap();
+
+        let expected_samples: Vec<i32> =
+            read_text_to_vec(Path::new(ONE_CHANNEL_EXPECTED_I24)).unwrap();
+        let expected_samples: Box<[i32]> = expected_samples.into_boxed_slice();
+        let expected_samples: Box<[i24]> = expected_samples.convert_slice();
+
+        assert_eq!(samples.len(), expected_samples.len(), "Lengths not equal");
+
+        for (idx, (expected, actual)) in expected_samples.iter().zip(samples).enumerate() {
+            assert_eq!(*expected, *actual, "{} != {} at {}", expected, actual, idx);
+        }
+
+        std::fs::remove_file(Path::new(&out_fp)).unwrap();
     }
 
     fn read_lines<P>(filename: P) -> std::io::Result<std::io::Lines<std::io::BufReader<File>>>

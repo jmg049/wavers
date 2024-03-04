@@ -4,7 +4,7 @@ use std::fmt::Debug;
 use bytemuck::Pod;
 use num_traits::Num;
 
-use crate::core::alloc_sample_buffer;
+use crate::{core::alloc_sample_buffer, i24};
 
 /// Trait used to indicate that a type is an audio sample and can be treated as such.
 pub trait AudioSample:
@@ -22,6 +22,7 @@ pub trait AudioSample:
 }
 
 impl AudioSample for i16 {}
+impl AudioSample for i24 {}
 impl AudioSample for i32 {}
 impl AudioSample for f32 {}
 impl AudioSample for f64 {}
@@ -53,10 +54,18 @@ where
     }
 }
 
+// i16 //
 impl ConvertTo<i16> for i16 {
     #[inline(always)]
     fn convert_to(&self) -> i16 {
         *self
+    }
+}
+
+impl ConvertTo<i24> for i16 {
+    #[inline(always)]
+    fn convert_to(&self) -> i24 {
+        i24::from_i32((*self as i32) << 8)
     }
 }
 
@@ -81,10 +90,55 @@ impl ConvertTo<f64> for i16 {
     }
 }
 
+// i24 //
+
+impl ConvertTo<i16> for i24 {
+    #[inline(always)]
+    fn convert_to(&self) -> i16 {
+        (self.to_i32() >> 8) as i16
+    }
+}
+
+impl ConvertTo<i24> for i24 {
+    #[inline(always)]
+    fn convert_to(&self) -> i24 {
+        *self
+    }
+}
+
+impl ConvertTo<i32> for i24 {
+    #[inline(always)]
+    fn convert_to(&self) -> i32 {
+        self.to_i32() << 8
+    }
+}
+
+impl ConvertTo<f32> for i24 {
+    #[inline(always)]
+    fn convert_to(&self) -> f32 {
+        (self.to_i32() as f32) / (i32::MAX as f32)
+    }
+}
+
+impl ConvertTo<f64> for i24 {
+    #[inline(always)]
+    fn convert_to(&self) -> f64 {
+        (self.to_i32() as f64) / (i32::MAX as f64)
+    }
+}
+
+// i32 //
 impl ConvertTo<i16> for i32 {
     #[inline(always)]
     fn convert_to(&self) -> i16 {
         (*self >> 16) as i16
+    }
+}
+
+impl ConvertTo<i24> for i32 {
+    #[inline(always)]
+    fn convert_to(&self) -> i24 {
+        i24::from_i32(*self >> 8)
     }
 }
 
@@ -109,10 +163,20 @@ impl ConvertTo<f64> for i32 {
     }
 }
 
+// f32 //
 impl ConvertTo<i16> for f32 {
     #[inline(always)]
     fn convert_to(&self) -> i16 {
         ((*self * (i16::MAX as f32)).clamp(i16::MIN as f32, i16::MAX as f32)).round() as i16
+    }
+}
+
+impl ConvertTo<i24> for f32 {
+    #[inline(always)]
+    fn convert_to(&self) -> i24 {
+        i24::from_i32(
+            ((*self * (i32::MAX as f32)).clamp(i32::MIN as f32, i32::MAX as f32)).round() as i32,
+        )
     }
 }
 
@@ -137,10 +201,20 @@ impl ConvertTo<f64> for f32 {
     }
 }
 
+// f64 //
 impl ConvertTo<i16> for f64 {
     #[inline(always)]
     fn convert_to(&self) -> i16 {
         ((*self * (i16::MAX as f64)).clamp(i16::MIN as f64, i16::MAX as f64)).round() as i16
+    }
+}
+
+impl ConvertTo<i24> for f64 {
+    #[inline(always)]
+    fn convert_to(&self) -> i24 {
+        i24::from_i32(
+            ((*self * (i32::MAX as f64)).clamp(i32::MIN as f64, i32::MAX as f64)).round() as i32,
+        )
     }
 }
 

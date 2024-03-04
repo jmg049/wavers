@@ -10,7 +10,6 @@ pub enum WaversError {
     InvalidType(String),
     #[error("IO error with file")]
     IOError(#[from] std::io::Error),
-
     #[cfg(feature = "ndarray")]
     #[error("IO error with ndarray")]
     NdArrayError(#[from] ndarray::ShapeError),

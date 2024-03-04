@@ -1,6 +1,6 @@
 [package]
 name = "wavers"
-version = "1.1.1"
+version = "1.2.0"
 edition = "2021"
 authors = ["Jack Geraghty <jgeraghty049@gmail.com>"]
 license = "MIT"
@@ -50,4 +50,3 @@ harness = false
 [features]
 ndarray = ["dep:ndarray"]
 pyo3 = ["dep:pyo3"]
-simd = []

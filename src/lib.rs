@@ -3,6 +3,10 @@
 //! WaveRs is a fast and lightweight library for reading and writing ``wav`` files.
 //! Currently, it supports reading and writing of ``i16``, ``i32``, ``f32``, and ``f64`` audio samples.
 //!
+//! **Experimental** support for ``i24`` audio samples is also available. The ``i24`` type supports conversion to and from the other sample types.
+//! The ``i24`` type supports Add, Sub, Mul, Div, Rem, Neg, BitXor, BitOr, BitAnd, Shl, Shr, Not, and their assignment counterparts.
+//! Feedback and bugs welcome!
+//!
 //! ## Highlights
 //! * Fast and lightweight
 //! * Simple API, read a wav file with ``read`` and write a wav file with ``write``
@@ -15,7 +19,6 @@
 //! * The API is tested, but there can always be more tests.
 //! * The crate has been benchmarked, but there can always be more benchmarks.
 //! * Some examples of planned features:
-//!     * Support for reading and writing of ``i24`` audio samples.
 //!     * Support iteration over samples in a wav file beyond calling ``iter()`` on the samples. Will providing windowing and other useful features.
 //!     * Investigate the performance of the ``write`` function.
 //!     * Channel wise iteration over samples in a wav file.
@@ -134,16 +137,12 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
-pub use crate::conversion::{AudioSample, ConvertTo};
+pub use crate::conversion::{AudioSample, ConvertSlice, ConvertTo};
 
-pub use crate::conversion::ConvertSlice;
-
-pub use crate::core::ReadSeek;
-pub use crate::core::{wav_spec, Samples, Wav, WavType};
+pub use crate::core::{wav_spec, ReadSeek, Samples, Wav, WavType};
 pub use crate::error::{WaversError, WaversResult};
 use crate::header::DATA;
 pub use crate::header::{FmtChunk, WavHeader};
-
 /// Reads a wav file and returns the samples and the sample rate.
 ///
 /// Throws an error if the file cannot be opened.
@@ -165,10 +164,12 @@ pub use crate::header::{FmtChunk, WavHeader};
 pub fn read<T: AudioSample, P: AsRef<Path>>(path: P) -> WaversResult<(Samples<T>, i32)>
 where
     i16: ConvertTo<T>,
+    i24: ConvertTo<T>,
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
     Box<[i16]>: ConvertSlice<T>,
+    Box<[i24]>: ConvertSlice<T>,
     Box<[i32]>: ConvertSlice<T>,
     Box<[f32]>: ConvertSlice<T>,
     Box<[f64]>: ConvertSlice<T>,
@@ -210,10 +211,12 @@ pub fn write<T: AudioSample, P: AsRef<Path>>(
 ) -> WaversResult<()>
 where
     i16: ConvertTo<T>,
+    i24: ConvertTo<T>,
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
     Box<[i16]>: ConvertSlice<T>,
+    Box<[i24]>: ConvertSlice<T>,
     Box<[i32]>: ConvertSlice<T>,
     Box<[f32]>: ConvertSlice<T>,
     Box<[f64]>: ConvertSlice<T>,
@@ -231,6 +234,193 @@ where
     f.write_all(&samples_bytes)?; // write the data
     Ok(())
 }
+
+use std::{
+    ops::{Neg, Not},
+    str::FromStr,
+};
+
+use bytemuck::{Pod, Zeroable};
+use num_traits::{Num, One, Zero};
+
+#[allow(non_camel_case_types)]
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+/// An experimental 24-bit unsigned integer type.
+///
+/// This type is a wrapper around ``[u8; 3]`` and is used to represent 24-bit audio samples.
+/// It should not be used anywhere important. It is still unverified and experimental.
+///
+/// The type is not yet fully implemented and is not guaranteed to work.
+/// Supports basic arithmetic operations and conversions to and from ``i32``.
+/// The [AudioSample](wavers::core::AudioSample) trait is implemented for this type and so are the [ConvertTo](wavers::core::ConvertTo) and [ConvertSlice](wavers::core::ConvertSlice) traits.
+///
+pub struct i24 {
+    pub data: [u8; 3],
+}
+
+unsafe impl Zeroable for i24 {}
+unsafe impl Pod for i24 {}
+
+impl One for i24 {
+    fn one() -> Self {
+        i24::from_i32(1)
+    }
+}
+
+impl Zero for i24 {
+    fn zero() -> Self {
+        i24::from_i32(0)
+    }
+
+    fn is_zero(&self) -> bool {
+        i24::from_i32(0) == *self
+    }
+}
+
+impl Num for i24 {
+    type FromStrRadixErr = std::num::ParseIntError;
+
+    fn from_str_radix(str: &str, radix: u32) -> Result<Self, Self::FromStrRadixErr> {
+        let i32_result = i32::from_str_radix(str, radix)?;
+        Ok(i24::from_i32(i32_result))
+    }
+}
+
+impl std::fmt::Display for i24 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_i32())
+    }
+}
+
+impl FromStr for i24 {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let i32_result = i32::from_str(s)?;
+        Ok(i24::from_i32(i32_result))
+    }
+}
+
+impl i24 {
+    pub const fn to_i32(self) -> i32 {
+        let [a, b, c] = self.data;
+        i32::from_ne_bytes([a, b, c, 0])
+    }
+
+    pub const fn from_i32(n: i32) -> Self {
+        let [a, b, c, _d] = i32::to_ne_bytes(n);
+        Self { data: [a, b, c] }
+    }
+}
+
+impl Neg for i24 {
+    type Output = Self;
+
+    fn neg(self) -> Self {
+        let i32_result = self.to_i32().wrapping_neg();
+        i24::from_i32(i32_result)
+    }
+}
+
+impl Not for i24 {
+    type Output = Self;
+
+    fn not(self) -> Self {
+        let i32_result = !self.to_i32();
+        i24::from_i32(i32_result)
+    }
+}
+
+macro_rules! implement_ops {
+    ($($trait_path:path { $($function_name:ident),* }),*) => {
+        $(
+            impl $trait_path for i24 {
+                $(
+                    type Output = Self;
+
+                    fn $function_name(self, other: Self) -> Self {
+                        let self_i32: i32 = self.to_i32();
+                        let other_i32: i32 = other.to_i32();
+                        let result = self_i32.$function_name(other_i32);
+                        Self::from_i32(result)
+                    }
+                )*
+            }
+        )*
+    };
+}
+
+macro_rules! implement_ops_assign {
+    ($($trait_path:path { $($function_name:ident),* }),*) => {
+        $(
+            impl $trait_path for i24 {
+                $(
+                    fn $function_name(&mut self, other: Self){
+                        let mut self_i32: i32 = self.to_i32();
+                        let other_i32: i32 = other.to_i32();
+                        self_i32.$function_name(other_i32);
+                    }
+                )*
+            }
+        )*
+    };
+}
+
+macro_rules! implement_ops_assign_ref {
+    ($($trait_path:path { $($function_name:ident),* }),*) => {
+        $(
+            impl $trait_path for &i24 {
+                $(
+                    fn $function_name(&mut self, other: Self){
+                        let mut self_i32: i32 = self.to_i32();
+                        let other_i32: i32 = other.to_i32();
+                        self_i32.$function_name(other_i32);
+                    }
+                )*
+            }
+        )*
+    };
+}
+
+implement_ops!(
+    std::ops::Add { add },
+    std::ops::Sub { sub },
+    std::ops::Mul { mul },
+    std::ops::Div { div },
+    std::ops::Rem { rem },
+    std::ops::BitAnd { bitand },
+    std::ops::BitOr { bitor },
+    std::ops::BitXor { bitxor },
+    std::ops::Shl { shl },
+    std::ops::Shr { shr }
+);
+
+implement_ops_assign!(
+    std::ops::AddAssign { add_assign },
+    std::ops::SubAssign { sub_assign },
+    std::ops::MulAssign { mul_assign },
+    std::ops::DivAssign { div_assign },
+    std::ops::RemAssign { rem_assign },
+    std::ops::BitAndAssign { bitand_assign },
+    std::ops::BitOrAssign { bitor_assign },
+    std::ops::BitXorAssign { bitxor_assign },
+    std::ops::ShlAssign { shl_assign },
+    std::ops::ShrAssign { shr_assign }
+);
+
+implement_ops_assign_ref!(
+    std::ops::AddAssign { add_assign },
+    std::ops::SubAssign { sub_assign },
+    std::ops::MulAssign { mul_assign },
+    std::ops::DivAssign { div_assign },
+    std::ops::RemAssign { rem_assign },
+    std::ops::BitAndAssign { bitand_assign },
+    std::ops::BitOrAssign { bitor_assign },
+    std::ops::BitXorAssign { bitxor_assign },
+    std::ops::ShlAssign { shl_assign },
+    std::ops::ShrAssign { shr_assign }
+);
 
 #[cfg(test)]
 mod tests {
@@ -315,6 +505,8 @@ mod tests {
     }
     read_tests!(i16, i32, f32, f64);
 
+    // No tests for i24 as it it requires a different approach to testing.
+    // It is tested in crate::core::core_tests.
     macro_rules! write_tests {
         ($($T:ident), *) => {
             $(
@@ -357,6 +549,8 @@ mod tests {
         };
     }
 
+    // No tests for i24 as it it requires a different approach to testing.
+    // It is tested in the crate::core::core_tests.
     write_tests!(i16, i32, f32, f64);
 
     use crate::ConvertSlice;

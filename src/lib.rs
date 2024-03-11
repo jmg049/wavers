@@ -128,10 +128,12 @@
 //! Benchmarks were conducted on the reading and writing functionality of WaveRs and compared to the ``hound`` crate.
 //!
 
+mod chunks;
 mod conversion;
 mod core;
 mod error;
 mod header;
+mod wav_type;
 
 use std::fs;
 use std::io::Write;
@@ -139,10 +141,13 @@ use std::path::Path;
 
 pub use crate::conversion::{AudioSample, ConvertSlice, ConvertTo};
 
-pub use crate::core::{wav_spec, ReadSeek, Samples, Wav, WavType};
+pub use crate::chunks::{FactChunk, FmtChunk};
+pub use crate::core::{wav_spec, ReadSeek, Samples, Wav};
 pub use crate::error::{WaversError, WaversResult};
+pub use crate::header::WavHeader;
 use crate::header::DATA;
-pub use crate::header::{FmtChunk, WavHeader};
+pub use crate::wav_type::{FormatCode, WavType};
+
 /// Reads a wav file and returns the samples and the sample rate.
 ///
 /// Throws an error if the file cannot be opened.
@@ -225,9 +230,24 @@ where
     let samples_bytes = s.as_bytes();
 
     let new_header = WavHeader::new_header::<T>(sample_rate, n_channels, s.len())?;
-    let header_bytes = new_header.as_bytes();
     let mut f = fs::File::create(fp)?;
-    f.write_all(&header_bytes)?;
+
+    match new_header.fmt_chunk.format {
+        FormatCode::WAV_FORMAT_PCM => {
+            let header_bytes = new_header.as_base_bytes();
+            f.write_all(&header_bytes)?;
+        }
+        FormatCode::WAV_FORMAT_IEEE_FLOAT | FormatCode::WAVE_FORMAT_EXTENSIBLE => {
+            let header_bytes = new_header.as_extended_bytes();
+            f.write_all(&header_bytes)?;
+        }
+        _ => {
+            return Err(WaversError::InvalidType(
+                "Invalid wav type. Unsupported type".into(),
+            ))
+        }
+    }
+
     f.write_all(&DATA)?;
     let data_size_bytes = samples_bytes.len() as u32; // write up to the data size
     f.write_all(&data_size_bytes.to_ne_bytes())?; // write the data size

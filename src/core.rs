@@ -17,7 +17,8 @@ use crate::conversion::ConvertSlice;
 use crate::conversion::{AudioSample, ConvertTo};
 use crate::error::{WaversError, WaversResult};
 use crate::header::{read_header, WavHeader, DATA};
-use crate::i24;
+use crate::wav_type::WavType;
+use crate::{i24, FormatCode};
 
 #[cfg(feature = "pyo3")]
 use pyo3::prelude::*;
@@ -108,7 +109,7 @@ where
     pub fn read(&mut self) -> WaversResult<Samples<T>> {
         let (data_offset, data_size_bytes) = self.header().data().into();
         let native_type = self.wav_info.wav_type;
-        let native_size_bytes: usize = native_type.into();
+        let native_size_bytes: usize = native_type.n_bytes();
         let number_of_samples_already_read = (self.reader.seek(SeekFrom::Current(0))?
             - data_offset as u64)
             / native_size_bytes as u64;
@@ -130,7 +131,7 @@ where
     pub fn read_samples(&mut self, n_samples: usize) -> WaversResult<Samples<T>> {
         let native_type = self.wav_info.wav_type;
 
-        let native_size_bytes: usize = native_type.into();
+        let native_size_bytes: usize = native_type.n_bytes();
         let n_native_bytes: usize = n_samples * native_size_bytes;
 
         let mut samples = alloc_box_buffer(n_native_bytes);
@@ -138,31 +139,31 @@ where
 
         let wav_type_from_file = self.wav_info.wav_type;
 
-        let desired_type: WavType = TypeId::of::<T>().try_into()?;
+        let desired_type = WavType::try_from(TypeId::of::<T>())?;
 
         if wav_type_from_file == desired_type {
             return Ok(Samples::from(cast_slice::<u8, T>(&samples)));
         }
 
         match wav_type_from_file {
-            WavType::Pcm16 => {
+            WavType::Pcm16 | WavType::EPcm16 => {
                 let samples: &[i16] = cast_slice::<u8, i16>(&samples);
                 Ok(Samples::from(samples).convert())
             }
-            WavType::Pcm24 => {
+            WavType::Pcm24 | WavType::EPcm24 => {
                 // Read the samples as i32 first and then convert
                 let samples: &[i24] = cast_slice::<u8, i24>(&samples);
                 Ok(Samples::from(samples).convert())
             }
-            WavType::Pcm32 => {
+            WavType::Pcm32 | WavType::EPcm32 => {
                 let samples: &[i32] = cast_slice::<u8, i32>(&samples);
                 Ok(Samples::from(samples).convert())
             }
-            WavType::Float32 => {
+            WavType::Float32 | WavType::EFloat32 => {
                 let samples: &[f32] = cast_slice::<u8, f32>(&samples);
                 Ok(Samples::from(samples).convert())
             }
-            WavType::Float64 => {
+            WavType::Float64 | WavType::EFloat64 => {
                 let samples: &[f64] = cast_slice::<u8, f64>(&samples);
                 Ok(Samples::from(samples).convert())
             }
@@ -181,17 +182,46 @@ where
         self.wav_info.wav_header =
             WavHeader::new_header::<F>(fmt_chunk.sample_rate, fmt_chunk.channels, samples.len())?;
 
-        let header_bytes = self.header().as_bytes();
-
         let f = std::fs::File::create(p)?;
         let mut buf_writer: BufWriter<File> = BufWriter::new(f);
         let data_size_bytes = sample_bytes.len() as u32; // write up to the data size
 
-        buf_writer.write_all(&header_bytes)?;
+        match self.format() {
+            (FormatCode::WAV_FORMAT_PCM, FormatCode::WAV_FORMAT_PCM) => {
+                let header_bytes = self.wav_info.wav_header.as_base_bytes();
+                buf_writer.write_all(&header_bytes)?;
+            }
+            (FormatCode::WAV_FORMAT_IEEE_FLOAT, _) => {
+                let header_bytes = self.wav_info.wav_header.as_extended_bytes(); // need to check if the format should always be marked as extended
+                buf_writer.write_all(&header_bytes)?;
+            }
+            (FormatCode::WAVE_FORMAT_EXTENSIBLE, FormatCode::WAV_FORMAT_PCM) => {
+                let header_bytes = self.wav_info.wav_header.as_cb_bytes();
+                buf_writer.write_all(&header_bytes)?;
+            }
+            (FormatCode::WAVE_FORMAT_EXTENSIBLE, _) => {
+                let header_bytes = self.wav_info.wav_header.as_extended_bytes();
+                buf_writer.write_all(&header_bytes)?;
+            }
+            _ => {
+                return Err(WaversError::UnsupportedWriteFormat(
+                    self.format().0,
+                    self.format().1,
+                ));
+            }
+        };
+
         buf_writer.write_all(&DATA)?;
         buf_writer.write_all(&data_size_bytes.to_ne_bytes())?; // write the data size
         buf_writer.write_all(&sample_bytes)?; // write the data
         Ok(())
+    }
+
+    pub fn format(&self) -> (FormatCode, FormatCode) {
+        let fmt_chunk = self.header().fmt_chunk;
+        let format = fmt_chunk.format;
+        let sub_format = fmt_chunk.format();
+        (format, sub_format)
     }
 
     /// Returns a reference header of the wav file.
@@ -269,127 +299,6 @@ pub struct WavInfo {
 pub struct WavInfo {
     pub wav_type: WavType, // the type of the wav file
     pub wav_header: WavHeader,
-}
-
-impl Into<(WavHeader, WavType)> for WavInfo {
-    fn into(self) -> (WavHeader, WavType) {
-        (self.wav_header, self.wav_type)
-    }
-}
-
-impl TryInto<WavType> for TypeId {
-    type Error = WaversError;
-
-    fn try_into(self) -> Result<WavType, Self::Error> {
-        if self == TypeId::of::<i16>() {
-            Ok(WavType::Pcm16)
-        } else if self == TypeId::of::<i24>() {
-            Ok(WavType::Pcm24)
-        } else if self == TypeId::of::<i32>() {
-            Ok(WavType::Pcm32)
-        } else if self == TypeId::of::<f32>() {
-            Ok(WavType::Float32)
-        } else if self == TypeId::of::<f64>() {
-            Ok(WavType::Float64)
-        } else {
-            Err(WaversError::InvalidType(format!("Invalid type {:?}", self)))
-        }
-    }
-}
-
-impl Into<usize> for WavType {
-    fn into(self) -> usize {
-        match self {
-            WavType::Pcm16 => std::mem::size_of::<i16>(),
-            WavType::Pcm24 => std::mem::size_of::<i24>(),
-            WavType::Pcm32 => std::mem::size_of::<i32>(),
-            WavType::Float32 => std::mem::size_of::<f32>(),
-            WavType::Float64 => std::mem::size_of::<f64>(),
-        }
-    }
-}
-
-/// Enum representing the encoding of a wav file.
-#[cfg(not(feature = "pyo3"))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WavType {
-    Pcm16,
-    Pcm24,
-    Pcm32,
-    Float32,
-    Float64,
-}
-
-/// Enum representing the encoding of a wav file.
-/// This enum is used when the pyo3 feature is enabled.
-#[cfg(feature = "pyo3")]
-#[pyclass]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WavType {
-    Pcm16,
-    Pcm24,
-    Pcm32,
-    Float32,
-    Float64,
-}
-
-impl Display for WavType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            WavType::Pcm16 => write!(f, "PCM16"),
-            WavType::Pcm24 => write!(f, "PCM24"),
-            WavType::Pcm32 => write!(f, "PCM32"),
-            WavType::Float32 => write!(f, "Float32"),
-            WavType::Float64 => write!(f, "Float64"),
-        }
-    }
-}
-
-impl TryFrom<(u16, u16)> for WavType {
-    type Error = WaversError;
-
-    fn try_from(value: (u16, u16)) -> Result<Self, Self::Error> {
-        Ok(match value {
-            (1, 16) => WavType::Pcm16,
-            (1, 24) => WavType::Pcm24,
-            (1, 32) => WavType::Pcm32,
-            (3, 32) => WavType::Float32,
-            (3, 64) => WavType::Float64,
-            _ => {
-                return Err(WaversError::InvalidType(
-                    format!(
-                        "Invalid wav type. Unsupported type {}, and number of bytes per samples {}",
-                        value.0, value.1
-                    )
-                    .into(),
-                ))
-            }
-        })
-    }
-}
-
-impl Into<TypeId> for WavType {
-    fn into(self) -> TypeId {
-        match self {
-            WavType::Pcm16 => TypeId::of::<i16>(),
-            WavType::Pcm24 => TypeId::of::<i24>(),
-            WavType::Pcm32 => TypeId::of::<i32>(),
-            WavType::Float32 => TypeId::of::<f32>(),
-            WavType::Float64 => TypeId::of::<f64>(),
-        }
-    }
-}
-
-impl Into<(u16, u16, u16)> for WavType {
-    fn into(self) -> (u16, u16, u16) {
-        match self {
-            WavType::Pcm16 => (1, 16, 2),
-            WavType::Pcm24 => (1, 24, 3),
-            WavType::Pcm32 => (1, 32, 4),
-            WavType::Float32 => (3, 32, 4),
-            WavType::Float64 => (3, 64, 8),
-        }
-    }
 }
 
 #[cfg(feature = "ndarray")]
@@ -809,7 +718,11 @@ mod core_tests {
         let mut wav: Wav<i16> =
             Wav::from_path(ONE_CHANNEL_WAV_I16).expect("Failed to open wav file");
         let first_second_samples = wav.read_samples(wav.sample_rate() as usize).unwrap();
-        assert_eq!(first_second_samples.len(), wav.sample_rate() as usize);
+        assert_eq!(
+            first_second_samples.len(),
+            wav.sample_rate() as usize,
+            "Lengths not equal"
+        );
 
         let remaining_samples = wav.read().unwrap();
         assert_eq!(

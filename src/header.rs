@@ -12,10 +12,18 @@ use std::{
 use pyo3::prelude::*;
 
 use crate::{
+    chunks::{
+        fmt::{CbSize, ExtFmtChunkInfo, FMT_CB_SIZE},
+        FmtChunk,
+    },
     conversion::AudioSample,
-    core::{ReadSeek, WavInfo, WavType},
+    core::{ReadSeek, WavInfo},
     error::{WaversError, WaversResult},
+    wav_type::{FormatCode, WavType},
+    Wav,
 };
+
+use crate::chunks::fmt::{FMT_SIZE_BASE_SIZE, FMT_SIZE_EXTENDED_SIZE};
 
 const RIFF: [u8; 4] = *b"RIFF";
 pub const DATA: [u8; 4] = *b"data";
@@ -23,7 +31,6 @@ const WAVE: [u8; 4] = *b"WAVE";
 const FMT: [u8; 4] = *b"fmt ";
 
 const RIFF_SIZE: usize = 12;
-const FMT_SIZE: usize = 16;
 
 /// A struct used to store the offset and size of a chunk
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -109,21 +116,82 @@ impl WavHeader {
         T: AudioSample,
     {
         let wav_type: WavType = TypeId::of::<T>().try_into()?;
-        let (format, bits_per_sample, _) = wav_type.into();
 
-        let fmt_chunk = FmtChunk::new(format, n_channels, sample_rate, bits_per_sample);
+        let (main_format, sub_format) = match wav_type {
+            WavType::Pcm16 | WavType::Pcm24 | WavType::Pcm32 => {
+                (FormatCode::WAV_FORMAT_PCM, FormatCode::WAV_FORMAT_PCM)
+            }
+            WavType::Float32 | WavType::Float64 => (
+                FormatCode::WAVE_FORMAT_EXTENSIBLE,
+                FormatCode::WAV_FORMAT_IEEE_FLOAT,
+            ),
+            WavType::EPcm16 | WavType::EPcm24 | WavType::EPcm32 => (
+                FormatCode::WAVE_FORMAT_EXTENSIBLE,
+                FormatCode::WAV_FORMAT_PCM,
+            ),
+            WavType::EFloat32 | WavType::EFloat64 => (
+                FormatCode::WAVE_FORMAT_EXTENSIBLE,
+                FormatCode::WAV_FORMAT_IEEE_FLOAT,
+            ),
+        };
+
+        let (_, bits_per_sample, _) = wav_type.into();
+
+        let ext_fmt_chunk = match (main_format, sub_format) {
+            (FormatCode::WAV_FORMAT_PCM, FormatCode::WAV_FORMAT_PCM) => {
+                ExtFmtChunkInfo::new(CbSize::Base, bits_per_sample, 0, FormatCode::WAV_FORMAT_PCM)
+            }
+            (FormatCode::WAVE_FORMAT_EXTENSIBLE, FormatCode::WAV_FORMAT_PCM) => {
+                ExtFmtChunkInfo::new(CbSize::Base, bits_per_sample, 0, FormatCode::WAV_FORMAT_PCM)
+            }
+            (FormatCode::WAVE_FORMAT_EXTENSIBLE, FormatCode::WAV_FORMAT_IEEE_FLOAT) => {
+                ExtFmtChunkInfo::new(
+                    CbSize::Base,
+                    bits_per_sample,
+                    0,
+                    FormatCode::WAV_FORMAT_IEEE_FLOAT,
+                )
+            }
+            _ => {
+                return Err(WaversError::InvalidType(format!(
+                    "Unsupported wav type: {:?}",
+                    wav_type
+                )))
+            }
+        };
+
+        let fmt_chunk = FmtChunk::new(
+            main_format,
+            n_channels,
+            sample_rate,
+            bits_per_sample,
+            ext_fmt_chunk,
+        );
         let mut header_info = HashMap::new();
 
         let data_size_bytes = n_samples * (bits_per_sample / 8) as usize;
         let file_size_bytes = data_size_bytes + 44; // 4 bytes for RIFF + 4 bytes for size + 4 bytes for WAVE + 4 bytes for FMT  + 4 bytes for fmt size + 16 bytes for fmt chunk + 4 bytes for DATA + 4 bytes for data size + data_size_bytes
 
+        let header_offset = match main_format {
+            FormatCode::WAV_FORMAT_PCM => FMT_SIZE_BASE_SIZE,
+            FormatCode::WAV_FORMAT_IEEE_FLOAT | FormatCode::WAVE_FORMAT_EXTENSIBLE => {
+                FMT_SIZE_EXTENDED_SIZE
+            }
+            _ => {
+                return Err(WaversError::InvalidType(format!(
+                    "Unsupported wav type: {:?}",
+                    wav_type
+                )))
+            }
+        };
+
         header_info.insert(RIFF.into(), HeaderChunkInfo::new(0, RIFF_SIZE as u32));
         // insert fmt
-        header_info.insert(FMT.into(), HeaderChunkInfo::new(12, FMT_SIZE as u32));
+        header_info.insert(FMT.into(), HeaderChunkInfo::new(12, header_offset as u32));
         // insert data
         header_info.insert(
             DATA.into(),
-            HeaderChunkInfo::new(36, data_size_bytes as u32),
+            HeaderChunkInfo::new(12 + header_offset, data_size_bytes as u32),
         );
         let current_file_size = file_size_bytes;
 
@@ -139,18 +207,42 @@ impl WavHeader {
         self.current_file_size
     }
 
-    /// Converts the WavHeader into an array of bytes.
-    /// Since the data chunk is not included at this stage, the size is known.
-    pub fn as_bytes(&self) -> [u8; 36] {
-        let mut bytes = [0; 36]; // 4 bytes for RIFF + 4 bytes for size + 4 bytes for WAVE + 4 bytes for FMT  + 4 bytes for fmt size + 16 bytes for fmt chunk
+    pub fn as_base_bytes(&self) -> [u8; 36] {
+        let mut bytes = [0; 36];
         bytes[0..4].copy_from_slice(&RIFF);
         let size = self.file_size() as u32;
         bytes[4..8].copy_from_slice(&size.to_ne_bytes());
         bytes[8..12].copy_from_slice(&WAVE);
         bytes[12..16].copy_from_slice(&FMT);
-        bytes[16..20].copy_from_slice(&(FMT_SIZE as u32).to_ne_bytes());
-        let fmt_bytes: [u8; FMT_SIZE] = self.fmt_chunk.into();
+        bytes[16..20].copy_from_slice(&(FMT_SIZE_BASE_SIZE as u32).to_ne_bytes());
+        let fmt_bytes: [u8; FMT_SIZE_BASE_SIZE] = self.fmt_chunk.into();
         bytes[20..36].copy_from_slice(&fmt_bytes);
+        bytes
+    }
+
+    pub fn as_cb_bytes(&self) -> [u8; 38] {
+        let mut bytes = [0; 38];
+        bytes[0..4].copy_from_slice(&RIFF);
+        let size = self.file_size() as u32;
+        bytes[4..8].copy_from_slice(&size.to_ne_bytes());
+        bytes[8..12].copy_from_slice(&WAVE);
+        bytes[12..16].copy_from_slice(&FMT);
+        bytes[16..20].copy_from_slice(&(FMT_CB_SIZE as u32).to_ne_bytes());
+        let fmt_bytes: [u8; FMT_CB_SIZE] = self.fmt_chunk.into();
+        bytes[16..38].copy_from_slice(&fmt_bytes);
+        bytes
+    }
+
+    pub fn as_extended_bytes(&self) -> [u8; 60] {
+        let mut bytes = [0; 60];
+        bytes[0..4].copy_from_slice(&RIFF);
+        let size = self.file_size() as u32;
+        bytes[4..8].copy_from_slice(&size.to_ne_bytes());
+        bytes[8..12].copy_from_slice(&WAVE);
+        bytes[12..16].copy_from_slice(&FMT);
+        bytes[16..20].copy_from_slice(&(FMT_SIZE_EXTENDED_SIZE as u32).to_ne_bytes());
+        let fmt_bytes: [u8; FMT_SIZE_EXTENDED_SIZE] = self.fmt_chunk.into();
+        bytes[20..60].copy_from_slice(&fmt_bytes);
         bytes
     }
 
@@ -203,107 +295,6 @@ impl Debug for ChunkIdentifier {
     }
 }
 
-///
-/// A struct for storing the necessary format information about a wav file.
-///
-/// In total the struct is 16 bytes
-///
-#[cfg(not(feature = "pyo3"))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(C)]
-pub struct FmtChunk {
-    /// Format of the audio data. 1 for PCM, 3 for IEEE float.
-    pub format: u16,
-    /// Number of channels in the audio data.
-    pub channels: u16,
-    /// Sample rate of the audio data.
-    pub sample_rate: i32,
-    /// Byte rate of the audio data.
-    pub byte_rate: i32,
-    /// Block align of the audio data.
-    pub block_align: u16,
-    /// Bits per sample of the audio data.
-    pub bits_per_sample: u16,
-}
-
-/// A struct for storing the necessary format information about a wav file.
-/// This version is compiled when using the pyo3 feature.
-/// In total the struct is 16 bytes
-#[cfg(feature = "pyo3")]
-#[pyclass]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(C)]
-pub struct FmtChunk {
-    /// Format of the audio data. 1 for PCM, 3 for IEEE float.
-    #[pyo3(get)]
-    pub format: u16,
-    /// Number of channels in the audio data.
-    #[pyo3(get)]
-    pub channels: u16,
-    /// Sample rate of the audio data.
-    #[pyo3(get)]
-    pub sample_rate: i32,
-    /// Byte rate of the audio data.
-    #[pyo3(get)]
-    pub byte_rate: i32,
-    /// Block align of the audio data.
-    #[pyo3(get)]
-    pub block_align: u16,
-    /// Bits per sample of the audio data.
-    #[pyo3(get)]
-    pub bits_per_sample: u16,
-}
-
-impl FmtChunk {
-    /// Constructs a new FmtChunk using the provided format, number of channels, sample rate and bits per sample.
-    /// The remaining fields are calculating using these arguments
-    pub fn new(format: u16, channels: u16, sample_rate: i32, bits_per_sample: u16) -> Self {
-        let block_align = (channels * bits_per_sample) / 8;
-        let byte_rate = sample_rate * (block_align as i32);
-        FmtChunk {
-            format,
-            channels,
-            sample_rate,
-            byte_rate,
-            block_align,
-            bits_per_sample,
-        }
-    }
-
-    /// Function to update a WavHeader to a new encoding, for example i16 to f32. Does this in-place.
-    #[inline(always)]
-    pub fn update_fmt_chunk(&mut self, new_type: WavType) -> WaversResult<()> {
-        let current_type = WavType::try_from((self.format, self.bits_per_sample))?;
-
-        if current_type == new_type {
-            return Ok(());
-        }
-
-        let new_type_info: (u16, u16, u16) = new_type.into();
-        let (new_format, new_bits_per_sample, new_block_align) = new_type_info;
-        let new_byte_rate: i32 =
-            self.sample_rate * (self.channels as i32) * (new_block_align as i32);
-
-        self.format = new_format;
-        self.block_align = new_block_align;
-        self.byte_rate = new_byte_rate;
-        self.bits_per_sample = new_bits_per_sample;
-        Ok(())
-    }
-}
-
-impl Into<[u8; FMT_SIZE]> for FmtChunk {
-    fn into(self) -> [u8; FMT_SIZE] {
-        unsafe { std::mem::transmute_copy::<FmtChunk, [u8; FMT_SIZE]>(&self) }
-    }
-}
-
-impl Into<FmtChunk> for [u8; FMT_SIZE] {
-    fn into(self) -> FmtChunk {
-        unsafe { std::mem::transmute_copy::<[u8; FMT_SIZE], FmtChunk>(&self) }
-    }
-}
-
 /// Reads the header of a wav file and returns a tuple containing the header information and the wav encoding.
 /// Mostly for convenience, but can also be used to inspect a wav file without reading the data.
 pub(crate) fn read_header(readable: &mut Box<dyn ReadSeek>) -> WaversResult<WavInfo> {
@@ -326,17 +317,52 @@ pub(crate) fn read_header(readable: &mut Box<dyn ReadSeek>) -> WaversResult<WavI
     let fmt_entry = header_info.get(&FMT.into()).unwrap(); // Safe since we just checked that the key exists
     readable.seek(SeekFrom::Start(fmt_entry.offset as u64))?; // +4 to move to beyond the chunk identifier
 
-    let mut fmt_buf: [u8; FMT_SIZE] = [0; FMT_SIZE as usize];
-    readable.read_exact(&mut fmt_buf)?;
-    let fmt_chunk: FmtChunk = fmt_buf.into();
+    let mut fmt_code_buf: [u8; 2] = [0; 2];
+    readable.read_exact(&mut fmt_code_buf)?;
 
-    let wav_type = crate::core::WavType::try_from((fmt_chunk.format, fmt_chunk.bits_per_sample))?;
+    // move the reader back two bytes so that we can decode the fmt format code again
+    readable.seek(SeekFrom::Current(-2))?;
+
+    let main_format_code = FormatCode::try_from(u16::from_ne_bytes(fmt_code_buf))?;
+    println!("Main format code: {}", main_format_code);
+
+    let fmt_chunk: FmtChunk = match main_format_code {
+        FormatCode::WAV_FORMAT_PCM => {
+            let mut fmt_buf: [u8; FMT_SIZE_BASE_SIZE] = [0; FMT_SIZE_BASE_SIZE];
+            readable.read_exact(&mut fmt_buf)?;
+            fmt_buf.into()
+        }
+        FormatCode::WAV_FORMAT_IEEE_FLOAT => {
+            // In theory, the below is the correct approach for non-PCM formats, but so far with testing, it seems that the fmt chunk is always 16 bytes long when the format is set to 3.
+            // let mut fmt_buf: [u8; FMT_CB_SIZE] = [0; FMT_CB_SIZE];
+            let mut fmt_buf: [u8; FMT_SIZE_BASE_SIZE] = [0; FMT_SIZE_BASE_SIZE];
+            readable.read_exact(&mut fmt_buf)?;
+            fmt_buf.into()
+        }
+        FormatCode::WAVE_FORMAT_ALAW => todo!(),
+        FormatCode::WAVE_FORMAT_MULAW => todo!(),
+        FormatCode::WAVE_FORMAT_EXTENSIBLE => {
+            let mut fmt_buf: [u8; FMT_SIZE_EXTENDED_SIZE] = [0; FMT_SIZE_EXTENDED_SIZE];
+            readable.read_exact(&mut fmt_buf)?;
+            fmt_buf.into()
+        }
+    };
+
+    // let mut fmt_buf: [u8; FMT_SIZE] = [0; FMT_SIZE as usize];
+    // readable.read_exact(&mut fmt_buf)?;
+    // let fmt_chunk: FmtChunk = fmt_buf.into();
+
+    let wav_type = WavType::try_from((
+        fmt_chunk.format,
+        fmt_chunk.bits_per_sample,
+        fmt_chunk.format(),
+    ))?;
 
     let total_size_in_bytes = header_info
         .get(&DATA.into())
         .expect("File does not contain a data chunk")
         .size
-        + 44; // 44 bytes for the header
+        + 44; // 44 bytes for the header // TODO! This is not always true!
     let wav_header = WavHeader::new(header_info, fmt_chunk, total_size_in_bytes as usize);
 
     Ok(WavInfo {
@@ -400,18 +426,19 @@ fn buf_eq(buf: &[u8; 4], chunk_id: &[u8; 4]) -> bool {
 #[cfg(test)]
 mod header_tests {
     use super::*;
-    use crate::FmtChunk;
+    use crate::chunks::fmt::{CbSize, ExtFmtChunkInfo};
     use std::fs::File;
 
     const TEST_FILE: &str = "./test_resources/one_channel_i16.wav";
 
     const ONE_CHANNEL_FMT_CHUNK: FmtChunk = FmtChunk {
-        format: 1,
+        format: FormatCode::WAV_FORMAT_PCM,
         channels: 1,
         sample_rate: 16000,
         byte_rate: 16000 * 2 * 1,
         block_align: 2,
         bits_per_sample: 16,
+        ext_fmt_chunk: ExtFmtChunkInfo::new(CbSize::Base, 16, 0, FormatCode::WAV_FORMAT_PCM),
     };
 
     #[test]
@@ -430,7 +457,7 @@ mod header_tests {
         let file = File::open(TEST_FILE).unwrap();
         let mut file = Box::new(file) as Box<dyn ReadSeek>;
         let wav_info = read_header(&mut file).expect("Failed to read header");
-        let fmt_bytes: [u8; FMT_SIZE] = wav_info.wav_header.fmt_chunk.into();
+        let fmt_bytes: [u8; FMT_SIZE_BASE_SIZE] = wav_info.wav_header.fmt_chunk.into();
 
         let new_fmt = fmt_bytes.into();
         assert_eq!(

@@ -11,6 +11,8 @@
 //! * Fast and lightweight
 //! * Simple API, read a wav file with ``read`` and write a wav file with ``write``
 //! * Easy and efficient conversion between different types of audio samples.
+//! * Support for the Extensible format.
+//! * Increasing support for different chunks in the wav file.
 //! * Support for the ``ndarray`` crate.
 //!
 //! ## Crate Status
@@ -22,6 +24,7 @@
 //!     * Support iteration over samples in a wav file beyond calling ``iter()`` on the samples. Will providing windowing and other useful features.
 //!     * Investigate the performance of the ``write`` function.
 //!     * Channel wise iteration over samples in a wav file.
+//!     * Any suggestions or requests are welcome.
 //!
 //! ## Examples
 //! The following examples show how to read and write a wav file, as well as retrieving information from the header.
@@ -67,9 +70,7 @@
 //! use wavers::Wav;
 //! use std::path::Path;
 //!
-//!
 //! fn main() {
-//!
 //! 	let fp: &Path = &Path::new("path/to/wav.wav");
 //! 	let out_fp: &Path = &Path::new("out/path/to/wav.wav");
 //!
@@ -93,11 +94,8 @@
 //! fn main() {
 //!	    let fp = "path/to/wav.wav";
 //!     let wav: Wav<i16> = Wav::from_path(fp).unwrap();
-//!     let sample_rate = wav.sample_rate();
-//!     let n_channels = wav.n_channels();
-//!     let duration = wav.duration();
-//!     let encoding = wav.encoding();
-//!     let (sample_rate, n_channels, duration, encoing) = wav_spec(fp).unwrap();
+//!     let wav_spec = wav.wav_spec(); // returns the duration and the header
+//!     println!("{:?}", wav_spec);
 //! }
 //! ```
 //!
@@ -127,22 +125,29 @@
 //! To check out the benchmarks head on over to the benchmarks wiki page on the WaveRs <a href=https://github.com/jmg049/wavers/wiki/Benchmarks>GitHub</a>.
 //! Benchmarks were conducted on the reading and writing functionality of WaveRs and compared to the ``hound`` crate.
 //!
-
+mod chunks;
 mod conversion;
 mod core;
 mod error;
 mod header;
+mod wav_type;
 
+use std::fmt::{self, Display};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
 
+#[cfg(feature = "pyo3")]
+use pyo3::prelude::*;
+
 pub use crate::conversion::{AudioSample, ConvertSlice, ConvertTo};
 
-pub use crate::core::{wav_spec, ReadSeek, Samples, Wav, WavType};
+pub use crate::chunks::{FactChunk, FmtChunk, ListChunk, DATA, FACT, LIST, RIFF, WAVE};
+pub use crate::core::{wav_spec, ReadSeek, Samples, Wav};
 pub use crate::error::{WaversError, WaversResult};
-use crate::header::DATA;
-pub use crate::header::{FmtChunk, WavHeader};
+pub use crate::header::WavHeader;
+pub use crate::wav_type::{FormatCode, WavType};
+
 /// Reads a wav file and returns the samples and the sample rate.
 ///
 /// Throws an error if the file cannot be opened.
@@ -225,9 +230,26 @@ where
     let samples_bytes = s.as_bytes();
 
     let new_header = WavHeader::new_header::<T>(sample_rate, n_channels, s.len())?;
-    let header_bytes = new_header.as_bytes();
     let mut f = fs::File::create(fp)?;
-    f.write_all(&header_bytes)?;
+
+    match new_header.fmt_chunk.format {
+        FormatCode::WAV_FORMAT_PCM => {
+            let header_bytes = new_header.as_base_bytes();
+            f.write_all(&header_bytes)?;
+        }
+        FormatCode::WAV_FORMAT_IEEE_FLOAT | FormatCode::WAVE_FORMAT_EXTENSIBLE => {
+            let header_bytes = new_header.as_extended_bytes();
+            f.write_all(&header_bytes)?;
+        }
+        _ => {
+            return Err(WaversError::InvalidType(
+                new_header.fmt_chunk.format,
+                new_header.fmt_chunk.bits_per_sample,
+                new_header.fmt_chunk.ext_fmt_chunk.sub_format(),
+            ))
+        }
+    }
+
     f.write_all(&DATA)?;
     let data_size_bytes = samples_bytes.len() as u32; // write up to the data size
     f.write_all(&data_size_bytes.to_ne_bytes())?; // write the data size
@@ -246,6 +268,7 @@ use num_traits::{Num, One, Zero};
 #[allow(non_camel_case_types)]
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[cfg(not(feature = "pyo3"))]
 /// An experimental 24-bit unsigned integer type.
 ///
 /// This type is a wrapper around ``[u8; 3]`` and is used to represent 24-bit audio samples.
@@ -255,6 +278,15 @@ use num_traits::{Num, One, Zero};
 /// Supports basic arithmetic operations and conversions to and from ``i32``.
 /// The [AudioSample](wavers::core::AudioSample) trait is implemented for this type and so are the [ConvertTo](wavers::core::ConvertTo) and [ConvertSlice](wavers::core::ConvertSlice) traits.
 ///
+pub struct i24 {
+    pub data: [u8; 3],
+}
+
+#[allow(non_camel_case_types)]
+#[repr(C)]
+#[cfg(feature = "pyo3")]
+#[pyclass]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct i24 {
     pub data: [u8; 3],
 }
@@ -287,8 +319,8 @@ impl Num for i24 {
     }
 }
 
-impl std::fmt::Display for i24 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for i24 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_i32())
     }
 }
@@ -329,6 +361,17 @@ impl Not for i24 {
     fn not(self) -> Self {
         let i32_result = !self.to_i32();
         i24::from_i32(i32_result)
+    }
+}
+#[cfg(feature = "pyo3")]
+use numpy::Element;
+
+#[cfg(feature = "pyo3")]
+unsafe impl Element for i24 {
+    const IS_COPY: bool = true;
+
+    fn get_dtype<'py>(py: Python<'py>) -> &'py numpy::PyArrayDescr {
+        numpy::dtype::<i24>(py)
     }
 }
 
@@ -423,7 +466,7 @@ implement_ops_assign_ref!(
 );
 
 #[cfg(test)]
-mod tests {
+mod lib_tests {
     use approx_eq::assert_approx_eq;
     use std::io::BufRead;
     use std::{fs::File, path::Path, str::FromStr};

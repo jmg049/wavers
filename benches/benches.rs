@@ -1,8 +1,8 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hound::WavReader;
 
-use std::{fs::File, path::Path, time::Duration};
-use wavers::{read, ReadSeek, Samples, Wav};
+use std::{path::Path, time::Duration};
+use wavers::{read, Samples, Wav};
 
 const BENCHMARK_SIZE: usize = 10;
 

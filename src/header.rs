@@ -11,26 +11,24 @@ use std::{
 #[cfg(feature = "pyo3")]
 use pyo3::prelude::*;
 
+#[cfg(feature = "colored")]
+use colored::Colorize;
+
 use crate::{
     chunks::{
-        fmt::{CbSize, ExtFmtChunkInfo, FMT_CB_SIZE},
-        FmtChunk,
+        fmt::{CbSize, ExtFmtChunkInfo, FMT_CB_SIZE, FMT_SIZE_BASE_SIZE, FMT_SIZE_EXTENDED_SIZE},
+        list::InfoId,
+        read_chunk, Chunk, FmtChunk, ListChunk, DATA, FACT, FMT, LIST, RIFF, WAVE,
     },
     conversion::AudioSample,
     core::{ReadSeek, WavInfo},
     error::{WaversError, WaversResult},
+    header,
     wav_type::{FormatCode, WavType},
-    Wav,
+    FactChunk,
 };
 
-use crate::chunks::fmt::{FMT_SIZE_BASE_SIZE, FMT_SIZE_EXTENDED_SIZE};
-
-const RIFF: [u8; 4] = *b"RIFF";
-pub const DATA: [u8; 4] = *b"data";
-const WAVE: [u8; 4] = *b"WAVE";
-const FMT: [u8; 4] = *b"fmt ";
-
-const RIFF_SIZE: usize = 12;
+const RIFF_SIZE: usize = 4; // do not count the size or RIFF id, only the WAVE id. The other chunks will be used for the remaining size
 
 /// A struct used to store the offset and size of a chunk
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -167,10 +165,14 @@ impl WavHeader {
             bits_per_sample,
             ext_fmt_chunk,
         );
-        let mut header_info = HashMap::new();
 
-        let data_size_bytes = n_samples * (bits_per_sample / 8) as usize;
-        let file_size_bytes = data_size_bytes + 44; // 4 bytes for RIFF + 4 bytes for size + 4 bytes for WAVE + 4 bytes for FMT  + 4 bytes for fmt size + 16 bytes for fmt chunk + 4 bytes for DATA + 4 bytes for data size + data_size_bytes
+        let fact_chunk = FactChunk::new((n_samples / n_channels as usize) as u32); // number of samples per channel
+
+        let mut list_chunk_data: HashMap<InfoId, String> = HashMap::new();
+        list_chunk_data.insert(*b"ISFT", "Wavers".to_string()); // Software used to create the file
+        let list_chunk = ListChunk::new(*b"INFO", list_chunk_data);
+
+        let mut header_info: HashMap<ChunkIdentifier, HeaderChunkInfo> = HashMap::new();
 
         let header_offset = match main_format {
             FormatCode::WAV_FORMAT_PCM => FMT_SIZE_BASE_SIZE,
@@ -188,13 +190,34 @@ impl WavHeader {
         header_info.insert(RIFF.into(), HeaderChunkInfo::new(0, RIFF_SIZE as u32));
         // insert fmt
         header_info.insert(FMT.into(), HeaderChunkInfo::new(12, header_offset as u32));
+
+        header_info.insert(
+            FACT.into(),
+            HeaderChunkInfo::new(12 + header_offset, fact_chunk.size() as u32 + 8),
+        );
+
+        header_info.insert(
+            LIST.into(),
+            HeaderChunkInfo::new(
+                12 + header_offset + fact_chunk.size() as usize + 8,
+                list_chunk.size() as u32 + 8,
+            ),
+        );
+
+        let data_size_bytes = n_samples * (bits_per_sample / 8) as usize;
+
         // insert data
         header_info.insert(
             DATA.into(),
             HeaderChunkInfo::new(12 + header_offset, data_size_bytes as u32),
         );
-        let current_file_size = file_size_bytes;
 
+        let current_file_size = header_info
+            .iter()
+            .filter(|(k, _)| !buf_eq(k.as_ref(), &RIFF))
+            .map(|(_, v)| v.size + 8)
+            .sum::<u32>() as usize
+            + 8; // Go through each chunk found and sum the size field, +8 for each chunk identifier and size field
         Ok(WavHeader {
             header_info,
             fmt_chunk,
@@ -213,10 +236,15 @@ impl WavHeader {
         let size = self.file_size() as u32;
         bytes[4..8].copy_from_slice(&size.to_ne_bytes());
         bytes[8..12].copy_from_slice(&WAVE);
-        bytes[12..16].copy_from_slice(&FMT);
-        bytes[16..20].copy_from_slice(&(FMT_SIZE_BASE_SIZE as u32).to_ne_bytes());
-        let fmt_bytes: [u8; FMT_SIZE_BASE_SIZE] = self.fmt_chunk.into();
-        bytes[20..36].copy_from_slice(&fmt_bytes);
+
+        let fmt_bytes = self.fmt_chunk.as_bytes();
+        debug_assert!(
+            fmt_bytes.len() == FMT_SIZE_BASE_SIZE + 8,
+            "Fmt bytes length is not equal to the expected length: {} vs {}",
+            fmt_bytes.len(),
+            FMT_SIZE_BASE_SIZE + 8
+        );
+        bytes[12..12 + fmt_bytes.len()].copy_from_slice(&fmt_bytes);
         bytes
     }
 
@@ -226,10 +254,16 @@ impl WavHeader {
         let size = self.file_size() as u32;
         bytes[4..8].copy_from_slice(&size.to_ne_bytes());
         bytes[8..12].copy_from_slice(&WAVE);
-        bytes[12..16].copy_from_slice(&FMT);
-        bytes[16..20].copy_from_slice(&(FMT_CB_SIZE as u32).to_ne_bytes());
-        let fmt_bytes: [u8; FMT_CB_SIZE] = self.fmt_chunk.into();
-        bytes[16..38].copy_from_slice(&fmt_bytes);
+
+        let fmt_bytes = self.fmt_chunk.as_bytes();
+        debug_assert!(
+            fmt_bytes.len() == FMT_CB_SIZE + 8,
+            "Fmt bytes length is not equal to the expected length: {} vs {}",
+            fmt_bytes.len(),
+            FMT_CB_SIZE + 8
+        );
+        bytes[12..12 + fmt_bytes.len()].copy_from_slice(&fmt_bytes);
+
         bytes
     }
 
@@ -241,13 +275,61 @@ impl WavHeader {
         bytes[8..12].copy_from_slice(&WAVE);
         bytes[12..16].copy_from_slice(&FMT);
         bytes[16..20].copy_from_slice(&(FMT_SIZE_EXTENDED_SIZE as u32).to_ne_bytes());
-        let fmt_bytes: [u8; FMT_SIZE_EXTENDED_SIZE] = self.fmt_chunk.into();
+        let fmt_bytes: [u8; FMT_SIZE_EXTENDED_SIZE] = self.fmt_chunk.extended_bytes();
         bytes[20..60].copy_from_slice(&fmt_bytes);
         bytes
     }
 
-    pub fn get_chunk(&self, chunk_identifier: ChunkIdentifier) -> Option<&HeaderChunkInfo> {
+    pub fn get_chunk_info(&self, chunk_identifier: ChunkIdentifier) -> Option<&HeaderChunkInfo> {
         self.header_info.get(&chunk_identifier)
+    }
+}
+#[cfg(feature = "colored")]
+impl Display for WavHeader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut header_info_string = String::new();
+        header_info_string.push_str(
+            "Header Info:\n"
+                .white()
+                .bold()
+                .underline()
+                .to_string()
+                .as_str(),
+        );
+        for (chunk_id, chunk_info) in &self.header_info {
+            let k = format!("{:?}", chunk_id).green().bold();
+            let v = format!("{:?}", chunk_info).white();
+            header_info_string.push_str(&format!("\t{}: {}\n", k, v));
+        }
+
+        let current_file_size = format!("Current file size: ").white().bold().underline();
+        let current_size = format!("{}", self.current_file_size).white();
+        write!(
+            f,
+            "{}\n{}\n{}{}",
+            header_info_string, self.fmt_chunk, current_file_size, current_size
+        )
+    }
+}
+#[cfg(not(feature = "colored"))]
+impl Display for WavHeader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut header_info_string = String::new();
+        header_info_string.push_str("Header Info:\n");
+        for (chunk_id, chunk_info) in &self.header_info {
+            let k = format!("{:?}", chunk_id);
+            let v = format!("{:?}", chunk_info);
+            header_info_string.push_str(&format!("\t{}: {}\n", k, v));
+        }
+
+        let current_file_size = format!("Current file size: ");
+        let current_size = format!("{}", self.current_file_size);
+
+        write!(
+            f,
+            "{}\n{}\n{}{}",
+            header_info_string, self.fmt_chunk, current_file_size, current_size
+        )
     }
 }
 
@@ -272,6 +354,12 @@ impl Into<[u8; 4]> for ChunkIdentifier {
 impl Into<ChunkIdentifier> for [u8; 4] {
     fn into(self) -> ChunkIdentifier {
         ChunkIdentifier::new(self)
+    }
+}
+
+impl AsRef<[u8; 4]> for ChunkIdentifier {
+    fn as_ref(&self) -> &[u8; 4] {
+        &self.identifier
     }
 }
 
@@ -315,42 +403,7 @@ pub(crate) fn read_header(readable: &mut Box<dyn ReadSeek>) -> WaversResult<WavI
     }
 
     let fmt_entry = header_info.get(&FMT.into()).unwrap(); // Safe since we just checked that the key exists
-    readable.seek(SeekFrom::Start(fmt_entry.offset as u64))?; // +4 to move to beyond the chunk identifier
-
-    let mut fmt_code_buf: [u8; 2] = [0; 2];
-    readable.read_exact(&mut fmt_code_buf)?;
-
-    // move the reader back two bytes so that we can decode the fmt format code again
-    readable.seek(SeekFrom::Current(-2))?;
-
-    let main_format_code = FormatCode::try_from(u16::from_ne_bytes(fmt_code_buf))?;
-    println!("Main format code: {}", main_format_code);
-
-    let fmt_chunk: FmtChunk = match main_format_code {
-        FormatCode::WAV_FORMAT_PCM => {
-            let mut fmt_buf: [u8; FMT_SIZE_BASE_SIZE] = [0; FMT_SIZE_BASE_SIZE];
-            readable.read_exact(&mut fmt_buf)?;
-            fmt_buf.into()
-        }
-        FormatCode::WAV_FORMAT_IEEE_FLOAT => {
-            // In theory, the below is the correct approach for non-PCM formats, but so far with testing, it seems that the fmt chunk is always 16 bytes long when the format is set to 3.
-            // let mut fmt_buf: [u8; FMT_CB_SIZE] = [0; FMT_CB_SIZE];
-            let mut fmt_buf: [u8; FMT_SIZE_BASE_SIZE] = [0; FMT_SIZE_BASE_SIZE];
-            readable.read_exact(&mut fmt_buf)?;
-            fmt_buf.into()
-        }
-        FormatCode::WAVE_FORMAT_ALAW => todo!(),
-        FormatCode::WAVE_FORMAT_MULAW => todo!(),
-        FormatCode::WAVE_FORMAT_EXTENSIBLE => {
-            let mut fmt_buf: [u8; FMT_SIZE_EXTENDED_SIZE] = [0; FMT_SIZE_EXTENDED_SIZE];
-            readable.read_exact(&mut fmt_buf)?;
-            fmt_buf.into()
-        }
-    };
-
-    // let mut fmt_buf: [u8; FMT_SIZE] = [0; FMT_SIZE as usize];
-    // readable.read_exact(&mut fmt_buf)?;
-    // let fmt_chunk: FmtChunk = fmt_buf.into();
+    let fmt_chunk: FmtChunk = read_chunk::<FmtChunk>(readable, fmt_entry)?;
 
     let wav_type = WavType::try_from((
         fmt_chunk.format,
@@ -358,12 +411,8 @@ pub(crate) fn read_header(readable: &mut Box<dyn ReadSeek>) -> WaversResult<WavI
         fmt_chunk.format(),
     ))?;
 
-    let total_size_in_bytes = header_info
-        .get(&DATA.into())
-        .expect("File does not contain a data chunk")
-        .size
-        + 44; // 44 bytes for the header // TODO! This is not always true!
-    let wav_header = WavHeader::new(header_info, fmt_chunk, total_size_in_bytes as usize);
+    let total_size = header_info.get(&RIFF.into()).unwrap().size as usize + 8;
+    let wav_header = WavHeader::new(header_info, fmt_chunk, total_size);
 
     Ok(WavInfo {
         wav_type,
@@ -394,22 +443,22 @@ fn discover_all_header_chunks(
 
     reader.read_exact(&mut buf)?; // read the next 4 bytes which should be the size of the file
 
-    entries.insert(RIFF.into(), HeaderChunkInfo::new(0, RIFF_SIZE as u32));
+    let file_size: u32 =
+        buf[0] as u32 | (buf[1] as u32) << 8 | (buf[2] as u32) << 16 | (buf[3] as u32) << 24;
+    entries.insert(RIFF.into(), HeaderChunkInfo::new(0, file_size as u32));
 
-    // The next 4 bytes should be the WAVE chunk
+    // The next 4 bytes should be the RIFF type id
     reader.read_exact(&mut buf)?;
     let _: ChunkIdentifier = buf.into();
 
     while let Ok(_) = reader.read_exact(&mut buf) {
         let chunk_identifier: ChunkIdentifier = buf.into();
-
         reader.read_exact(&mut buf)?;
         let chunk_size: u32 =
             buf[0] as u32 | (buf[1] as u32) << 8 | (buf[2] as u32) << 16 | (buf[3] as u32) << 24;
-
         entries.insert(
             chunk_identifier,
-            HeaderChunkInfo::new(reader.stream_position()? as usize, chunk_size),
+            HeaderChunkInfo::new(reader.stream_position()? as usize - 8, chunk_size),
         );
 
         reader.seek(SeekFrom::Current(chunk_size as i64))?;
@@ -426,10 +475,10 @@ fn buf_eq(buf: &[u8; 4], chunk_id: &[u8; 4]) -> bool {
 #[cfg(test)]
 mod header_tests {
     use super::*;
-    use crate::chunks::fmt::{CbSize, ExtFmtChunkInfo};
     use std::fs::File;
 
     const TEST_FILE: &str = "./test_resources/one_channel_i16.wav";
+    const TWO_CHANNEL_TEST_FILE: &str = "./test_resources/two_channel_i16.wav";
 
     const ONE_CHANNEL_FMT_CHUNK: FmtChunk = FmtChunk {
         format: FormatCode::WAV_FORMAT_PCM,
@@ -457,12 +506,40 @@ mod header_tests {
         let file = File::open(TEST_FILE).unwrap();
         let mut file = Box::new(file) as Box<dyn ReadSeek>;
         let wav_info = read_header(&mut file).expect("Failed to read header");
-        let fmt_bytes: [u8; FMT_SIZE_BASE_SIZE] = wav_info.wav_header.fmt_chunk.into();
-
-        let new_fmt = fmt_bytes.into();
+        let fmt_bytes = wav_info.wav_header.fmt_chunk.base_bytes();
+        let new_fmt = FmtChunk::from_bytes(&fmt_bytes);
         assert_eq!(
             wav_info.wav_header.fmt_chunk, new_fmt,
             "Fmt chunk does not match"
+        );
+    }
+
+    #[test]
+    fn test_printing() {
+        let file = File::open(TEST_FILE).unwrap();
+        let mut file = Box::new(file) as Box<dyn ReadSeek>;
+        let wav_info = read_header(&mut file).expect("Failed to read header");
+        println!("{}", wav_info.wav_header);
+    }
+
+    #[test]
+    fn test_size() {
+        let file = File::open(TEST_FILE).unwrap();
+        let mut file = Box::new(file) as Box<dyn ReadSeek>;
+        let wav_info = read_header(&mut file).expect("Failed to read header");
+        assert_eq!(
+            wav_info.wav_header.file_size(),
+            320044,
+            "File size does not match"
+        );
+
+        let file = File::open(TWO_CHANNEL_TEST_FILE).unwrap();
+        let mut file = Box::new(file) as Box<dyn ReadSeek>;
+        let wav_info = read_header(&mut file).expect("Failed to read header");
+        assert_eq!(
+            wav_info.wav_header.file_size(),
+            640044,
+            "File size does not match"
         );
     }
 }

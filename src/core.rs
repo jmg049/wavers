@@ -12,13 +12,15 @@ use bytemuck::cast_slice;
 #[cfg(feature = "ndarray")]
 use ndarray::{Array, Array2};
 
+use crate::chunks::{read_chunk, Chunk, ListChunk};
+use crate::chunks::{DATA, FACT, LIST};
 use crate::conversion::ConvertSlice;
 
 use crate::conversion::{AudioSample, ConvertTo};
 use crate::error::{WaversError, WaversResult};
-use crate::header::{read_header, WavHeader, DATA};
+use crate::header::{read_header, ChunkIdentifier, HeaderChunkInfo, WavHeader};
 use crate::wav_type::WavType;
-use crate::{i24, FormatCode};
+use crate::{i24, FactChunk, FmtChunk, FormatCode};
 
 #[cfg(feature = "pyo3")]
 use pyo3::prelude::*;
@@ -70,7 +72,7 @@ where
         let wav_info = read_header(&mut reader)?;
 
         let (data_offset, _) = wav_info.wav_header.data().into();
-
+        let data_offset = data_offset + 8;
         reader.seek(SeekFrom::Start(data_offset as u64))?;
         let (_, _, _n_bytes) = wav_info.wav_type.into();
 
@@ -108,6 +110,7 @@ where
     #[inline(always)]
     pub fn read(&mut self) -> WaversResult<Samples<T>> {
         let (data_offset, data_size_bytes) = self.header().data().into();
+        let data_offset = data_offset + 8;
         let native_type = self.wav_info.wav_type;
         let native_size_bytes: usize = native_type.n_bytes();
         let number_of_samples_already_read = (self.reader.seek(SeekFrom::Current(0))?
@@ -215,6 +218,29 @@ where
         buf_writer.write_all(&data_size_bytes.to_ne_bytes())?; // write the data size
         buf_writer.write_all(&sample_bytes)?; // write the data
         Ok(())
+    }
+
+    pub fn get_fact_chunk(&mut self) -> WaversResult<Option<FactChunk>> {
+        self.get_chunk(FACT.into())
+    }
+
+    pub fn get_list_chunk(&mut self) -> WaversResult<Option<ListChunk>> {
+        self.get_chunk(LIST.into())
+    }
+
+    /// Returns a Result containing an optional so as to allow the possibility of a missing fact chunk, but also to allow for the possibility of an error in reading that chunk.
+    pub fn get_chunk<C: Chunk>(&mut self, id: ChunkIdentifier) -> WaversResult<Option<C>> {
+        let header: &WavHeader = self.header();
+        let chunk_info: HeaderChunkInfo = match header.get_chunk_info(id) {
+            Some(info) => info.clone(),
+            None => return Ok(None),
+        };
+        let chunk = read_chunk::<C>(&mut self.reader, &chunk_info)?;
+        Ok(Some(chunk))
+    }
+
+    pub fn get_fmt_chunk(&self) -> &FmtChunk {
+        &self.wav_info.wav_header.fmt_chunk
     }
 
     pub fn format(&self) -> (FormatCode, FormatCode) {
@@ -538,7 +564,7 @@ mod core_tests {
     use crate::IntoNdarray;
 
     use approx_eq::assert_approx_eq;
-    use std::{fs::File, io::BufRead, path::Path, str::FromStr};
+    use std::{io::BufRead, str::FromStr};
 
     const ONE_CHANNEL_WAV_I16: &str = "./test_resources/one_channel_i16.wav";
     const TWO_CHANNEL_WAV_I16: &str = "./test_resources/two_channel_i16.wav";
@@ -678,12 +704,18 @@ mod core_tests {
             std::fs::create_dir(Path::new(TEST_OUTPUT)).unwrap();
         }
 
-        let mut wav: Wav<f32> = Wav::<f32>::from_path(ONE_CHANNEL_WAV_I16).unwrap();
+        let mut og_wav: Wav<f32> = Wav::<f32>::from_path(ONE_CHANNEL_WAV_I16).unwrap();
         let out_fp = format!("{}{}", TEST_OUTPUT, "convert_write_read.wav");
-        wav.write::<f32, _>(Path::new(&out_fp)).unwrap();
+        og_wav.write::<f32, _>(Path::new(&out_fp)).unwrap();
 
         let mut wav: Wav<f32> = Wav::<f32>::from_path(&out_fp).unwrap();
         let actual_samples: &[f32] = &wav.read().unwrap();
+
+        assert_ne!(
+            wav.header().current_file_size,
+            og_wav.header().current_file_size,
+            "File sizes are equal and they shouldn't be"
+        );
 
         let expected_samples =
             read_text_to_vec::<f32>(Path::new(ONE_CHANNEL_EXPECTED_F32)).unwrap();

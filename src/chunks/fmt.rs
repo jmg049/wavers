@@ -1,9 +1,15 @@
-use num_traits::ToBytes;
+use std::{fmt::Display, io::SeekFrom};
 
 use crate::{
+    chunks::{Chunk, FMT},
     wav_type::{FormatCode, WavType},
-    WaversResult,
+    ReadSeek, WaversResult,
 };
+
+#[cfg(feature = "colored")]
+use colored::Colorize;
+
+use super::FACT;
 
 pub const FMT_SIZE_BASE_SIZE: usize = 16; // Standard wav file format size
 pub const FMT_CB_SIZE: usize = 18; // An extended Format chunk is used for non-PCM data. The cbSize field gives the size of the extension. (0 or 22)
@@ -107,59 +113,218 @@ impl FmtChunk {
             false => self.format,
         }
     }
-}
 
-impl From<[u8; FMT_SIZE_BASE_SIZE]> for FmtChunk {
-    fn from(value: [u8; FMT_SIZE_BASE_SIZE]) -> Self {
-        let mut ext_buf: [u8; 40] = [0; 40];
-        ext_buf[0..FMT_SIZE_BASE_SIZE].copy_from_slice(&value); // standard fmt
-        ext_buf[FMT_SIZE_BASE_SIZE..FMT_SIZE_EXTENDED_SIZE]
-            .copy_from_slice(&ExtFmtChunkInfo::default_bytes());
-
-        unsafe { std::mem::transmute_copy::<[u8; FMT_SIZE_EXTENDED_SIZE], FmtChunk>(&ext_buf) }
-    }
-}
-
-impl From<[u8; FMT_CB_SIZE]> for FmtChunk {
-    fn from(value: [u8; FMT_CB_SIZE]) -> Self {
-        let mut ext_buf: [u8; 40] = [0; 40];
-        ext_buf[0..FMT_CB_SIZE].copy_from_slice(&value);
-        ext_buf[FMT_SIZE_BASE_SIZE..FMT_SIZE_EXTENDED_SIZE]
-            .copy_from_slice(&ExtFmtChunkInfo::default_bytes());
-
-        unsafe { std::mem::transmute_copy::<[u8; FMT_SIZE_EXTENDED_SIZE], FmtChunk>(&ext_buf) }
-    }
-}
-
-impl From<[u8; FMT_SIZE_EXTENDED_SIZE]> for FmtChunk {
-    fn from(value: [u8; FMT_SIZE_EXTENDED_SIZE]) -> Self {
-        unsafe { std::mem::transmute_copy::<[u8; FMT_SIZE_EXTENDED_SIZE], FmtChunk>(&value) }
-    }
-}
-
-impl Into<[u8; FMT_SIZE_EXTENDED_SIZE]> for FmtChunk {
-    fn into(self) -> [u8; FMT_SIZE_EXTENDED_SIZE] {
-        unsafe { std::mem::transmute_copy::<FmtChunk, [u8; FMT_SIZE_EXTENDED_SIZE]>(&self) }
-    }
-}
-
-impl Into<[u8; FMT_SIZE_BASE_SIZE]> for FmtChunk {
-    fn into(self) -> [u8; FMT_SIZE_BASE_SIZE] {
-        let full_bytes =
-            unsafe { std::mem::transmute_copy::<FmtChunk, [u8; FMT_SIZE_EXTENDED_SIZE]>(&self) };
+    pub fn base_bytes(&self) -> [u8; FMT_SIZE_BASE_SIZE] {
         let mut bytes = [0; FMT_SIZE_BASE_SIZE];
-        bytes.copy_from_slice(&full_bytes[0..FMT_SIZE_BASE_SIZE]);
+        bytes[0..2].copy_from_slice(&self.format.to_ne_bytes());
+        bytes[2..4].copy_from_slice(&self.channels.to_ne_bytes());
+        bytes[4..8].copy_from_slice(&self.sample_rate.to_ne_bytes());
+        bytes[8..12].copy_from_slice(&self.byte_rate.to_ne_bytes());
+        bytes[12..14].copy_from_slice(&self.block_align.to_ne_bytes());
+        bytes[14..16].copy_from_slice(&self.bits_per_sample.to_ne_bytes());
         bytes
+    }
+
+    pub fn cb_bytes(&self) -> [u8; FMT_CB_SIZE] {
+        let mut bytes = [0; FMT_CB_SIZE];
+        bytes[0..16].copy_from_slice(&self.base_bytes());
+        let cb: u16 = self.ext_fmt_chunk.cb_size as u16;
+        bytes[16..18].copy_from_slice(&cb.to_ne_bytes());
+        bytes
+    }
+
+    pub fn extended_bytes(&self) -> [u8; FMT_SIZE_EXTENDED_SIZE] {
+        let mut bytes = [0; FMT_SIZE_EXTENDED_SIZE];
+        bytes[0..16].copy_from_slice(&self.base_bytes());
+        bytes[16..40].copy_from_slice(&self.ext_fmt_chunk.as_bytes());
+        bytes
+    }
+
+    fn from_base_bytes(bytes: [u8; FMT_SIZE_BASE_SIZE]) -> Self {
+        let mut buf: [u8; FMT_SIZE_EXTENDED_SIZE] = [0; FMT_SIZE_EXTENDED_SIZE];
+        buf[0..FMT_SIZE_BASE_SIZE].copy_from_slice(&bytes);
+        buf[FMT_SIZE_BASE_SIZE..FMT_SIZE_EXTENDED_SIZE]
+            .copy_from_slice(&ExtFmtChunkInfo::default_bytes());
+        FmtChunk::from_extended_bytes(buf)
+    }
+
+    fn from_cb_bytes(bytes: [u8; FMT_CB_SIZE]) -> Self {
+        let mut buf: [u8; FMT_SIZE_EXTENDED_SIZE] = [0; FMT_SIZE_EXTENDED_SIZE];
+        buf[0..FMT_CB_SIZE].copy_from_slice(&bytes);
+        buf[FMT_CB_SIZE - 2..FMT_SIZE_EXTENDED_SIZE]
+            .copy_from_slice(&ExtFmtChunkInfo::default_bytes());
+        FmtChunk::from_extended_bytes(buf)
+    }
+
+    fn from_extended_bytes(bytes: [u8; FMT_SIZE_EXTENDED_SIZE]) -> Self {
+        unsafe { std::mem::transmute_copy::<[u8; FMT_SIZE_EXTENDED_SIZE], FmtChunk>(&bytes) }
+    }
+
+    #[allow(unused)]
+    // This function is only used in the tests
+    pub(crate) fn from_bytes(bytes: &[u8]) -> Self {
+        match bytes.len() {
+            FMT_SIZE_BASE_SIZE => FmtChunk::from_base_bytes(bytes.try_into().unwrap()),
+            FMT_CB_SIZE => FmtChunk::from_cb_bytes(bytes.try_into().unwrap()),
+            FMT_SIZE_EXTENDED_SIZE => FmtChunk::from_extended_bytes(bytes.try_into().unwrap()),
+            _ => panic!("Invalid fmt chunk size: {}", bytes.len()),
+        }
     }
 }
 
-impl Into<[u8; FMT_CB_SIZE]> for FmtChunk {
-    fn into(self) -> [u8; FMT_CB_SIZE] {
-        let full_bytes =
-            unsafe { std::mem::transmute_copy::<FmtChunk, [u8; FMT_SIZE_EXTENDED_SIZE]>(&self) };
-        let mut bytes = [0; FMT_CB_SIZE];
-        bytes.copy_from_slice(&full_bytes[0..FMT_CB_SIZE]);
-        bytes
+impl Chunk for FmtChunk {
+    fn id(&self) -> &[u8; 4] {
+        &FMT
+    }
+
+    fn size(&self) -> u32 {
+        match self.is_extended_format() {
+            true => match self.ext_fmt_chunk.cb_size {
+                CbSize::Base => FMT_CB_SIZE as u32,
+                CbSize::Extended => FMT_SIZE_EXTENDED_SIZE as u32,
+            },
+            false => FMT_SIZE_BASE_SIZE as u32,
+        }
+    }
+
+    fn as_bytes(&self) -> Box<[u8]> {
+        match self.is_extended_format() {
+            true => match self.ext_fmt_chunk.cb_size {
+                CbSize::Base => {
+                    let mut bytes: [u8; FMT_CB_SIZE + 8] = [0; FMT_CB_SIZE + 8];
+                    bytes[0..4].copy_from_slice(&FACT);
+                    bytes[4..8].copy_from_slice(&self.size().to_ne_bytes());
+                    bytes[8..FMT_CB_SIZE + 8].copy_from_slice(&self.cb_bytes());
+                    Box::new(bytes)
+                }
+                CbSize::Extended => {
+                    let mut bytes: [u8; FMT_SIZE_EXTENDED_SIZE + 8] =
+                        [0; FMT_SIZE_EXTENDED_SIZE + 8];
+                    bytes[0..4].copy_from_slice(&FACT);
+                    bytes[4..8].copy_from_slice(&self.size().to_ne_bytes());
+                    bytes[8..FMT_SIZE_EXTENDED_SIZE + 8].copy_from_slice(&self.extended_bytes());
+                    Box::new(bytes)
+                }
+            },
+            false => {
+                let mut bytes: [u8; FMT_SIZE_BASE_SIZE + 8] = [0; FMT_SIZE_BASE_SIZE + 8];
+                bytes[0..4].copy_from_slice(&FMT);
+                bytes[4..8].copy_from_slice(&self.size().to_ne_bytes());
+                bytes[8..FMT_SIZE_BASE_SIZE + 8].copy_from_slice(&self.base_bytes());
+                Box::new(bytes)
+            }
+        }
+    }
+
+    fn from_reader(
+        reader: &mut Box<dyn ReadSeek>,
+        info: &crate::header::HeaderChunkInfo,
+    ) -> WaversResult<Self>
+    where
+        Self: Sized,
+    {
+        let offset = info.offset as u64 + 8;
+        reader.seek(SeekFrom::Start(offset))?;
+        let mut fmt_code_buf: [u8; 2] = [0; 2];
+        reader.read_exact(&mut fmt_code_buf)?;
+
+        // move the reader back two bytes so that we can decode the fmt format code again
+        reader.seek(SeekFrom::Current(-2))?;
+
+        let main_format_code = FormatCode::try_from(u16::from_ne_bytes(fmt_code_buf))?;
+        let total_size_in_bytes = info.size as usize;
+        let fmt_chunk: FmtChunk = match main_format_code {
+            FormatCode::WAV_FORMAT_PCM => {
+                let mut fmt_buf: [u8; FMT_SIZE_BASE_SIZE] = [0; FMT_SIZE_BASE_SIZE];
+                reader.read_exact(&mut fmt_buf)?;
+                FmtChunk::from_base_bytes(fmt_buf)
+            }
+            FormatCode::WAV_FORMAT_IEEE_FLOAT => {
+                // In theory, the below is the correct approach for non-PCM formats, but so far with testing, it seems that the fmt chunk is always 16 bytes long when the format is set to 3.
+                // let mut fmt_buf: [u8; FMT_CB_SIZE] = [0; FMT_CB_SIZE];
+                let mut fmt_buf: [u8; FMT_SIZE_BASE_SIZE] = [0; FMT_SIZE_BASE_SIZE];
+                reader.read_exact(&mut fmt_buf)?;
+                FmtChunk::from_base_bytes(fmt_buf)
+            }
+            FormatCode::WAVE_FORMAT_ALAW => todo!(),
+            FormatCode::WAVE_FORMAT_MULAW => todo!(),
+            FormatCode::WAVE_FORMAT_EXTENSIBLE => match total_size_in_bytes {
+                FMT_CB_SIZE => {
+                    let mut fmt_buf: [u8; FMT_CB_SIZE] = [0; FMT_CB_SIZE];
+                    reader.read_exact(&mut fmt_buf)?;
+                    FmtChunk::from_cb_bytes(fmt_buf)
+                }
+                FMT_SIZE_EXTENDED_SIZE => {
+                    let mut fmt_buf: [u8; FMT_SIZE_EXTENDED_SIZE] = [0; FMT_SIZE_EXTENDED_SIZE];
+                    reader.read_exact(&mut fmt_buf)?;
+                    FmtChunk::from_extended_bytes(fmt_buf)
+                }
+                _ => {
+                    return Err(crate::WaversError::InvalidType(format!(
+                        "Invalid fmt chunk size: {}",
+                        total_size_in_bytes
+                    )))
+                }
+            },
+        };
+        Ok(fmt_chunk)
+    }
+}
+
+#[cfg(feature = "colored")]
+impl Display for FmtChunk {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let fmt = &"FmtChunk\n".white().bold().underline();
+        let format = &"\tFormat: ".green().bold();
+        let format_value = &format!("{},\n", self.format).white();
+
+        let channels = &"\tChannels: ".green().bold();
+        let channels_value = &format!("{},\n", self.channels).white();
+
+        let sample_rate = &"\tSample Rate: ".green().bold();
+        let sample_rate_value = &format!("{},\n", self.sample_rate).white();
+
+        let byte_rate = &"\tByte Rate: ".green().bold();
+        let byte_rate_value = &format!("{},\n", self.byte_rate).white();
+
+        let block_align = &"\tBlock Align: ".green().bold();
+        let block_align_value = &format!("{},\n", self.block_align).white();
+
+        let bits_per_sample = &"\tBits Per Sample: ".green().bold();
+        let bits_per_sample_value = &format!("{},\n", self.bits_per_sample).white();
+
+        write!(
+            f,
+            "{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
+            fmt,
+            format,
+            format_value,
+            channels,
+            channels_value,
+            sample_rate,
+            sample_rate_value,
+            byte_rate,
+            byte_rate_value,
+            block_align,
+            block_align_value,
+            bits_per_sample,
+            bits_per_sample_value,
+            self.ext_fmt_chunk
+        )
+    }
+}
+
+#[cfg(not(feature = "colored"))]
+impl Display for FmtChunk {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "FmtChunk\n")?;
+        write!(f, "\tFormat: {}\n", self.format)?;
+        write!(f, "\tChannels: {}\n", self.channels)?;
+        write!(f, "\tSample Rate: {}\n", self.sample_rate)?;
+        write!(f, "\tByte Rate: {}\n", self.byte_rate)?;
+        write!(f, "\tBlock Align: {}\n", self.block_align)?;
+        write!(f, "\tBits Per Sample: {}\n", self.bits_per_sample)?;
+        write!(f, "{}", self.ext_fmt_chunk)
     }
 }
 
@@ -172,6 +337,15 @@ pub enum CbSize {
 impl Default for CbSize {
     fn default() -> Self {
         CbSize::Base
+    }
+}
+
+impl Display for CbSize {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CbSize::Base => write!(f, "Base (0)"),
+            CbSize::Extended => write!(f, "Extended (22)"),
+        }
     }
 }
 
@@ -298,5 +472,59 @@ impl Default for ExtFmtChunkInfo {
             sub_format: FormatCode::WAV_FORMAT_PCM,
             guid: EXTENDED_FMT_GUID,
         }
+    }
+}
+
+#[cfg(feature = "colored")]
+impl Display for ExtFmtChunkInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let ext_fmt = &"\tExtended Format Chunk\n".white().bold().underline();
+
+        let cb_size = &"\t\tCB Size: ".green().bold();
+        let cb_size_value = &format!("{},\n", self.cb_size).white();
+
+        let valid_bits_per_sample = &"\t\tValid Bits Per Sample: ".green().bold();
+        let valid_bits_per_sample_value = &format!("{},\n", self.valid_bits_per_sample).white();
+
+        let channel_mask = &"\t\tChannel Mask: ".green().bold();
+        let channel_mask_value = &format!("{},\n", self.channel_mask).white();
+
+        let sub_format = &"\t\tSub Format: ".green().bold();
+        let sub_format_value = &format!("{},\n", self.sub_format).white();
+
+        let guid = &"\t\tGUID: ".green().bold();
+        let guid_value = &format!("{:?},\n", self.guid).white();
+
+        write!(
+            f,
+            "{}{}{}{}{}{}{}{}{}{}{}",
+            ext_fmt,
+            cb_size,
+            cb_size_value,
+            valid_bits_per_sample,
+            valid_bits_per_sample_value,
+            channel_mask,
+            channel_mask_value,
+            sub_format,
+            sub_format_value,
+            guid,
+            guid_value
+        )
+    }
+}
+
+#[cfg(not(feature = "colored"))]
+impl Display for ExtFmtChunkInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "\tExtended Format Chunk\n")?;
+        write!(f, "\t\tCB Size: {}\n", self.cb_size)?;
+        write!(
+            f,
+            "\t\tValid Bits Per Sample: {}\n",
+            self.valid_bits_per_sample
+        )?;
+        write!(f, "\t\tChannel Mask: {}\n", self.channel_mask)?;
+        write!(f, "\t\tSub Format: {}\n", self.sub_format)?;
+        write!(f, "\t\tGUID: {:?}\n", self.guid)
     }
 }

@@ -132,7 +132,7 @@ mod chunks;
 mod conversion;
 mod core;
 mod error;
-mod header;
+pub mod header;
 mod wav_type;
 
 use std::fs;
@@ -141,11 +141,10 @@ use std::path::Path;
 
 pub use crate::conversion::{AudioSample, ConvertSlice, ConvertTo};
 
-pub use crate::chunks::{FactChunk, FmtChunk};
+pub use crate::chunks::{FactChunk, FmtChunk, DATA};
 pub use crate::core::{wav_spec, ReadSeek, Samples, Wav};
 pub use crate::error::{WaversError, WaversResult};
 pub use crate::header::WavHeader;
-use crate::header::DATA;
 pub use crate::wav_type::{FormatCode, WavType};
 
 /// Reads a wav file and returns the samples and the sample rate.
@@ -443,7 +442,7 @@ implement_ops_assign_ref!(
 );
 
 #[cfg(test)]
-mod tests {
+mod lib_tests {
     use approx_eq::assert_approx_eq;
     use std::io::BufRead;
     use std::{fs::File, path::Path, str::FromStr};

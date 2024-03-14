@@ -1,15 +1,16 @@
 use std::{fmt::Display, io::SeekFrom};
 
 use crate::{
-    chunks::{Chunk, FMT},
-    wav_type::{FormatCode, WavType},
+    chunks::{Chunk, FACT, FMT},
+    wav_type::{format_info_to_wav_type, wav_type_to_format_info, FormatCode, WavType},
     ReadSeek, WaversResult,
 };
 
 #[cfg(feature = "colored")]
 use colored::Colorize;
 
-use super::FACT;
+#[cfg(feature = "pyo3")]
+use pyo3::prelude::*;
 
 pub const FMT_SIZE_BASE_SIZE: usize = 16; // Standard wav file format size
 pub const FMT_CB_SIZE: usize = 18; // An extended Format chunk is used for non-PCM data. The cbSize field gives the size of the extension. (0 or 22)
@@ -18,6 +19,8 @@ pub const FMT_SIZE_EXTENDED_SIZE: usize = 40; // CB_SIZE + 22 (2 bytes valid_bit
 const EXTENDED_FMT_GUID: [u8; 14] = *b"\x00\x00\x00\x00\x10\x00\x80\x00\x00\xAA\x00\x38\x9B\x71";
 pub const EXT_FORMAT_CODE: u16 = 0xFFFE;
 
+/// The format chunk of a wav file. This chunk contains information about the format of the audio data.
+/// This chunk must be present in a wav file.
 #[cfg(not(feature = "pyo3"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
@@ -43,17 +46,24 @@ pub struct FmtChunk {
 #[repr(C)]
 pub struct FmtChunk {
     /// Format of the audio data. 1 for PCM, 3 for IEEE float.
+    #[pyo3(get)]
     pub format: FormatCode,
     /// Number of channels in the audio data.
+    #[pyo3(get)]
     pub channels: u16,
     /// Sample rate of the audio data.
+    #[pyo3(get)]
     pub sample_rate: i32,
     /// Byte rate of the audio data.
+    #[pyo3(get)]
     pub byte_rate: i32,
     /// Block align of the audio data.
+    #[pyo3(get)]
     pub block_align: u16,
     /// Bits per sample of the audio data.
+    #[pyo3(get)]
     pub bits_per_sample: u16,
+    #[pyo3(get)]
     pub ext_fmt_chunk: ExtFmtChunkInfo,
 }
 
@@ -83,13 +93,14 @@ impl FmtChunk {
     /// Function to update a WavHeader to a new encoding, for example i16 to f32. Does this in-place.
     #[inline(always)]
     pub fn update_fmt_chunk(&mut self, new_type: WavType) -> WaversResult<()> {
-        let current_type = WavType::try_from((self.format, self.bits_per_sample, self.format()))?;
+        let current_type =
+            format_info_to_wav_type((self.format, self.bits_per_sample, self.format()))?;
 
         if current_type == new_type {
             return Ok(());
         }
 
-        let new_type_info: (FormatCode, u16, FormatCode) = new_type.into();
+        let new_type_info: (FormatCode, u16, FormatCode) = wav_type_to_format_info(new_type);
         let (new_format, new_bits_per_sample, _sub_format_code) = new_type_info;
         let new_block_align = new_bits_per_sample * (self.channels as u16) / 8;
         let new_byte_rate: i32 =
@@ -259,12 +270,7 @@ impl Chunk for FmtChunk {
                     reader.read_exact(&mut fmt_buf)?;
                     FmtChunk::from_extended_bytes(fmt_buf)
                 }
-                _ => {
-                    return Err(crate::WaversError::InvalidType(format!(
-                        "Invalid fmt chunk size: {}",
-                        total_size_in_bytes
-                    )))
-                }
+                _ => return Err(crate::WaversError::InvalidFmtChunkSize(total_size_in_bytes)),
             },
         };
         Ok(fmt_chunk)
@@ -328,7 +334,19 @@ impl Display for FmtChunk {
     }
 }
 
+/// An enum used to represent the two possible sizes of the extensible format chunk.
+#[cfg(not(feature = "pyo3"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u16)]
+pub enum CbSize {
+    Base = 0,
+    Extended = 22,
+}
+
+#[cfg(feature = "pyo3")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u16)]
+#[pyclass]
 pub enum CbSize {
     Base = 0,
     Extended = 22,
@@ -349,14 +367,33 @@ impl Display for CbSize {
     }
 }
 
+/// The extended format chunk of a wav file. This chunk contains additional information about the format of the audio data.
+/// This chunk is present when the format code is set to WAVE_FORMAT_EXTENSIBLE.
+#[cfg(not(feature = "pyo3"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
-
 pub struct ExtFmtChunkInfo {
     cb_size: CbSize,
     valid_bits_per_sample: u16,
     channel_mask: u32,
     sub_format: FormatCode,
+    guid: [u8; 14],
+}
+
+#[cfg(feature = "pyo3")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+#[pyclass]
+pub struct ExtFmtChunkInfo {
+    #[pyo3(get)]
+    cb_size: CbSize,
+    #[pyo3(get)]
+    valid_bits_per_sample: u16,
+    #[pyo3(get)]
+    channel_mask: u32,
+    #[pyo3(get)]
+    sub_format: FormatCode,
+    #[pyo3(get)]
     guid: [u8; 14],
 }
 
@@ -415,8 +452,8 @@ impl ExtFmtChunkInfo {
         bytes
     }
 
-    pub const fn default_bytes() -> [u8; 24] {
-        let mut bytes = [0; 24];
+    pub const fn default_bytes() -> [u8; std::mem::size_of::<Self>()] {
+        let mut bytes = [0; std::mem::size_of::<Self>()];
         let cb_size = CbSize::Base as u16;
         let valid_bits_per_sample: i16 = 16;
         let channel_mask: i32 = 0;

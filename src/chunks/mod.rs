@@ -19,9 +19,9 @@ pub const FMT: [u8; 4] = *b"fmt ";
 pub const LIST: [u8; 4] = *b"LIST";
 pub const FACT: [u8; 4] = *b"fact";
 
-#[allow(unused)]
-pub const AVAILABLE_CHUNKS: [[u8; 4]; 5] = [RIFF, WAVE, FMT, LIST, FACT];
-
+/// A trait representing a chunk in a wav file.
+/// Allows for the common creation of several chunks that are found in a wav file.
+/// Requires them to implement common decoding and encoding methods.
 pub trait Chunk: Display {
     fn id(&self) -> &[u8; 4];
     fn size(&self) -> u32;
@@ -31,6 +31,7 @@ pub trait Chunk: Display {
         Self: Sized;
 }
 
+/// Read a chunk from a wav file.
 pub fn read_chunk<T: Chunk>(
     reader: &mut Box<dyn ReadSeek>,
     info: &HeaderChunkInfo,

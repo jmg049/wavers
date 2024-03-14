@@ -20,9 +20,10 @@ doctest = false
 bytemuck = "1.13.1"
 paste = "1.0.14"
 thiserror = "1.0.48"
+num-traits = "0.2.16"
 ndarray = { version = "0.15.6", optional = true }
 pyo3 = { version = "0.20.0", features = ["extension-module"], optional = true }
-num-traits = "0.2.16"
+numpy = {version = "0.20.0", optional = true}
 colored = {version = "2.1.0", optional = true}
 
 [dev-dependencies]
@@ -50,5 +51,5 @@ harness = false
 ## add features
 [features]
 ndarray = ["dep:ndarray"]
-pyo3 = ["dep:pyo3"]
+pyo3 = ["dep:pyo3", "dep:numpy"]
 colored = ["dep:colored"]

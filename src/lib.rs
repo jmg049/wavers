@@ -127,7 +127,6 @@
 //! To check out the benchmarks head on over to the benchmarks wiki page on the WaveRs <a href=https://github.com/jmg049/wavers/wiki/Benchmarks>GitHub</a>.
 //! Benchmarks were conducted on the reading and writing functionality of WaveRs and compared to the ``hound`` crate.
 //!
-
 mod chunks;
 mod conversion;
 mod core;
@@ -135,9 +134,13 @@ mod error;
 pub mod header;
 mod wav_type;
 
+use std::fmt::{self, Display};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
+
+#[cfg(feature = "pyo3")]
+use pyo3::prelude::*;
 
 pub use crate::conversion::{AudioSample, ConvertSlice, ConvertTo};
 
@@ -242,7 +245,9 @@ where
         }
         _ => {
             return Err(WaversError::InvalidType(
-                "Invalid wav type. Unsupported type".into(),
+                new_header.fmt_chunk.format,
+                new_header.fmt_chunk.bits_per_sample,
+                new_header.fmt_chunk.ext_fmt_chunk.sub_format(),
             ))
         }
     }
@@ -265,6 +270,7 @@ use num_traits::{Num, One, Zero};
 #[allow(non_camel_case_types)]
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[cfg(not(feature = "pyo3"))]
 /// An experimental 24-bit unsigned integer type.
 ///
 /// This type is a wrapper around ``[u8; 3]`` and is used to represent 24-bit audio samples.
@@ -274,6 +280,15 @@ use num_traits::{Num, One, Zero};
 /// Supports basic arithmetic operations and conversions to and from ``i32``.
 /// The [AudioSample](wavers::core::AudioSample) trait is implemented for this type and so are the [ConvertTo](wavers::core::ConvertTo) and [ConvertSlice](wavers::core::ConvertSlice) traits.
 ///
+pub struct i24 {
+    pub data: [u8; 3],
+}
+
+#[allow(non_camel_case_types)]
+#[repr(C)]
+#[cfg(feature = "pyo3")]
+#[pyclass]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct i24 {
     pub data: [u8; 3],
 }
@@ -306,8 +321,8 @@ impl Num for i24 {
     }
 }
 
-impl std::fmt::Display for i24 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for i24 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_i32())
     }
 }
@@ -348,6 +363,17 @@ impl Not for i24 {
     fn not(self) -> Self {
         let i32_result = !self.to_i32();
         i24::from_i32(i32_result)
+    }
+}
+#[cfg(feature = "pyo3")]
+use numpy::Element;
+
+#[cfg(feature = "pyo3")]
+unsafe impl Element for i24 {
+    const IS_COPY: bool = true;
+
+    fn get_dtype<'py>(py: Python<'py>) -> &'py numpy::PyArrayDescr {
+        numpy::dtype::<i24>(py)
     }
 }
 

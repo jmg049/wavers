@@ -23,13 +23,14 @@ use crate::{
     conversion::AudioSample,
     core::{ReadSeek, WavInfo},
     error::{WaversError, WaversResult},
-    header,
-    wav_type::{FormatCode, WavType},
+    wav_type::{format_info_to_wav_type, FormatCode, WavType},
     FactChunk,
 };
 
 const RIFF_SIZE: usize = 4; // do not count the size or RIFF id, only the WAVE id. The other chunks will be used for the remaining size
-
+const HEADER_FMT_BASE_SIZE: usize = 36;
+const HEADER_FMT_CB_SIZE: usize = 38;
+const HEADER_FMT_EXTENDED_SIZE: usize = 60;
 /// A struct used to store the offset and size of a chunk
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct HeaderChunkInfo {
@@ -67,7 +68,9 @@ impl Into<(usize, u32)> for &HeaderChunkInfo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WavHeader {
     header_info: HashMap<ChunkIdentifier, HeaderChunkInfo>,
+    #[pyo3(get)]
     pub fmt_chunk: FmtChunk,
+    #[pyo3(get)]
     pub current_file_size: usize, // convenience field for keeping track of the current file size
 }
 
@@ -133,7 +136,7 @@ impl WavHeader {
             ),
         };
 
-        let (_, bits_per_sample, _) = wav_type.into();
+        let bits_per_sample = wav_type.n_bits();
 
         let ext_fmt_chunk = match (main_format, sub_format) {
             (FormatCode::WAV_FORMAT_PCM, FormatCode::WAV_FORMAT_PCM) => {
@@ -150,12 +153,7 @@ impl WavHeader {
                     FormatCode::WAV_FORMAT_IEEE_FLOAT,
                 )
             }
-            _ => {
-                return Err(WaversError::InvalidType(format!(
-                    "Unsupported wav type: {:?}",
-                    wav_type
-                )))
-            }
+            _ => return Err(WaversError::InvalidWavType(wav_type)),
         };
 
         let fmt_chunk = FmtChunk::new(
@@ -180,10 +178,7 @@ impl WavHeader {
                 FMT_SIZE_EXTENDED_SIZE
             }
             _ => {
-                return Err(WaversError::InvalidType(format!(
-                    "Unsupported wav type: {:?}",
-                    wav_type
-                )))
+                return Err(WaversError::InvalidWavType(wav_type));
             }
         };
 
@@ -230,8 +225,8 @@ impl WavHeader {
         self.current_file_size
     }
 
-    pub fn as_base_bytes(&self) -> [u8; 36] {
-        let mut bytes = [0; 36];
+    pub fn as_base_bytes(&self) -> [u8; HEADER_FMT_BASE_SIZE] {
+        let mut bytes = [0; HEADER_FMT_BASE_SIZE];
         bytes[0..4].copy_from_slice(&RIFF);
         let size = self.file_size() as u32;
         bytes[4..8].copy_from_slice(&size.to_ne_bytes());
@@ -248,8 +243,8 @@ impl WavHeader {
         bytes
     }
 
-    pub fn as_cb_bytes(&self) -> [u8; 38] {
-        let mut bytes = [0; 38];
+    pub fn as_cb_bytes(&self) -> [u8; HEADER_FMT_CB_SIZE] {
+        let mut bytes = [0; HEADER_FMT_CB_SIZE];
         bytes[0..4].copy_from_slice(&RIFF);
         let size = self.file_size() as u32;
         bytes[4..8].copy_from_slice(&size.to_ne_bytes());
@@ -267,8 +262,8 @@ impl WavHeader {
         bytes
     }
 
-    pub fn as_extended_bytes(&self) -> [u8; 60] {
-        let mut bytes = [0; 60];
+    pub fn as_extended_bytes(&self) -> [u8; HEADER_FMT_EXTENDED_SIZE] {
+        let mut bytes = [0; HEADER_FMT_EXTENDED_SIZE];
         bytes[0..4].copy_from_slice(&RIFF);
         let size = self.file_size() as u32;
         bytes[4..8].copy_from_slice(&size.to_ne_bytes());
@@ -284,6 +279,7 @@ impl WavHeader {
         self.header_info.get(&chunk_identifier)
     }
 }
+
 #[cfg(feature = "colored")]
 impl Display for WavHeader {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -405,7 +401,7 @@ pub(crate) fn read_header(readable: &mut Box<dyn ReadSeek>) -> WaversResult<WavI
     let fmt_entry = header_info.get(&FMT.into()).unwrap(); // Safe since we just checked that the key exists
     let fmt_chunk: FmtChunk = read_chunk::<FmtChunk>(readable, fmt_entry)?;
 
-    let wav_type = WavType::try_from((
+    let wav_type = format_info_to_wav_type((
         fmt_chunk.format,
         fmt_chunk.bits_per_sample,
         fmt_chunk.format(),

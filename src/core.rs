@@ -74,7 +74,6 @@ where
         let (data_offset, _) = wav_info.wav_header.data().into();
         let data_offset = data_offset + 8;
         reader.seek(SeekFrom::Start(data_offset as u64))?;
-        let (_, _, _n_bytes) = wav_info.wav_type.into();
 
         Ok(Self {
             _phantom: std::marker::PhantomData,
@@ -294,17 +293,15 @@ where
     }
 
     /// Returns the sample rate, number of channels, duration and encoding of a wav file.
-    pub fn wav_spec(&self) -> (i32, u16, u32, WavType) {
-        let sample_rate = self.sample_rate();
-        let n_channels = self.n_channels();
+    pub fn wav_spec(&self) -> (u32, WavHeader) {
         let duration = self.duration();
-        (sample_rate, n_channels, duration, self.encoding())
+        (duration, self.header().clone())
     }
 }
 
 /// Returns the sample rate, number of channels, duration and encoding of a wav file.
 /// Convenmience function which opens the wav file and reads the header.
-pub fn wav_spec<P: AsRef<Path>>(p: P) -> WaversResult<(i32, u16, u32, WavType)> {
+pub fn wav_spec<P: AsRef<Path>>(p: P) -> WaversResult<(u32, WavHeader)> {
     let wav = Wav::<i16>::from_path(p)?;
     Ok(wav.wav_spec())
 }

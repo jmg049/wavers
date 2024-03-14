@@ -3,14 +3,26 @@ use std::fmt::{Display, Formatter};
 #[cfg(feature = "colored")]
 use colored::Colorize;
 
+#[cfg(feature = "pyo3")]
+use pyo3::prelude::*;
+
 use crate::{
     chunks::{Chunk, FACT},
     header::HeaderChunkInfo,
     ReadSeek,
 };
 
+#[cfg(not(feature = "pyo3"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
+pub struct FactChunk {
+    pub num_samples: u32,
+}
+
+#[cfg(feature = "pyo3")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+#[pyclass]
 pub struct FactChunk {
     pub num_samples: u32,
 }

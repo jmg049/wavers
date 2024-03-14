@@ -6,6 +6,9 @@ use std::{
 #[cfg(feature = "colored")]
 use colored::Colorize;
 
+#[cfg(feature = "pyo3")]
+use pyo3::prelude::*;
+
 use crate::{
     chunks::{Chunk, LIST},
     core::alloc_box_buffer,
@@ -14,7 +17,17 @@ use crate::{
 
 pub type InfoId = [u8; 4];
 
+/// A List Chunk - a chunk that contains a list of other chunks. Each chunk in the list is identified by a 4 byte ID, followed by a 4 byte size, and then the data.
+#[cfg(not(feature = "pyo3"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListChunk {
+    list_type_id: [u8; 4],
+    data: HashMap<InfoId, String>,
+}
+
+#[cfg(feature = "pyo3")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[pyclass]
 pub struct ListChunk {
     list_type_id: [u8; 4],
     data: HashMap<InfoId, String>,

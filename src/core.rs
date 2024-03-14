@@ -28,8 +28,7 @@ use pyo3::prelude::*;
 /// Trait representing a type that can be used to read and seek.
 pub trait ReadSeek: Read + Seek {}
 
-impl ReadSeek for std::fs::File {}
-impl<T: ReadSeek> ReadSeek for std::io::BufReader<T> {}
+impl<T: Read + Seek> ReadSeek for T {}
 
 /// Struct representing a wav file.
 /// The struct contains a boxed reader and the header information of the wav file.

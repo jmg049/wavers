@@ -102,10 +102,12 @@ impl WavHeader {
         }
     }
 
+    /// Returns the information relating to the DATA chunk.
     pub fn data(&self) -> &HeaderChunkInfo {
         self.header_info.get(&DATA.into()).unwrap() // Safe since a header cannot be created without a DATA chunk
     }
 
+    /// Returns the information relating to the FMT chunk.
     pub fn fmt(&self) -> &HeaderChunkInfo {
         self.header_info.get(&FMT.into()).unwrap() // Safe since a header cannot be created without a FMT chunk
     }
@@ -225,6 +227,7 @@ impl WavHeader {
         self.current_file_size
     }
 
+    /// Returns the header in bytes, assuming that the FmtChunk is in the base format.
     pub fn as_base_bytes(&self) -> [u8; HEADER_FMT_BASE_SIZE] {
         let mut bytes = [0; HEADER_FMT_BASE_SIZE];
         bytes[0..4].copy_from_slice(&RIFF);
@@ -243,6 +246,7 @@ impl WavHeader {
         bytes
     }
 
+    /// Returns the header in bytes, assuming that the FmtChunk is in the cb (has cb field but no other extensible format fields) format.
     pub fn as_cb_bytes(&self) -> [u8; HEADER_FMT_CB_SIZE] {
         let mut bytes = [0; HEADER_FMT_CB_SIZE];
         bytes[0..4].copy_from_slice(&RIFF);
@@ -262,6 +266,7 @@ impl WavHeader {
         bytes
     }
 
+    /// Returns the header in bytes, assuming that the FmtChunk is in the extensible format.
     pub fn as_extended_bytes(&self) -> [u8; HEADER_FMT_EXTENDED_SIZE] {
         let mut bytes = [0; HEADER_FMT_EXTENDED_SIZE];
         bytes[0..4].copy_from_slice(&RIFF);
@@ -275,6 +280,7 @@ impl WavHeader {
         bytes
     }
 
+    /// Attempt to get some chunk information from the header. Returns None if the chunk is not found.
     pub fn get_chunk_info(&self, chunk_identifier: ChunkIdentifier) -> Option<&HeaderChunkInfo> {
         self.header_info.get(&chunk_identifier)
     }

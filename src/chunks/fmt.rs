@@ -153,17 +153,33 @@ impl FmtChunk {
 
     fn from_base_bytes(bytes: [u8; FMT_SIZE_BASE_SIZE]) -> Self {
         let mut buf: [u8; FMT_SIZE_EXTENDED_SIZE] = [0; FMT_SIZE_EXTENDED_SIZE];
+
+        let mut info_buf: [u8; 2] = [0; 2];
+        info_buf.copy_from_slice(&bytes[0..2]);
+        let format = FormatCode::try_from(u16::from_ne_bytes(info_buf)).unwrap();
+
+        info_buf.copy_from_slice(&bytes[14..16]);
+        let bits_per_sample = u16::from_ne_bytes(info_buf);
+
         buf[0..FMT_SIZE_BASE_SIZE].copy_from_slice(&bytes);
         buf[FMT_SIZE_BASE_SIZE..FMT_SIZE_EXTENDED_SIZE]
-            .copy_from_slice(&ExtFmtChunkInfo::default_bytes());
+            .copy_from_slice(&ExtFmtChunkInfo::default_bytes(format, bits_per_sample));
         FmtChunk::from_extended_bytes(buf)
     }
 
     fn from_cb_bytes(bytes: [u8; FMT_CB_SIZE]) -> Self {
         let mut buf: [u8; FMT_SIZE_EXTENDED_SIZE] = [0; FMT_SIZE_EXTENDED_SIZE];
         buf[0..FMT_CB_SIZE].copy_from_slice(&bytes);
+        let mut info_buf: [u8; 2] = [0; 2];
+
+        info_buf.copy_from_slice(&bytes[0..2]);
+
+        let format = FormatCode::try_from(u16::from_ne_bytes(info_buf)).unwrap();
+
+        info_buf.copy_from_slice(&bytes[14..16]);
+        let bits_per_sample = u16::from_ne_bytes(info_buf);
         buf[FMT_CB_SIZE - 2..FMT_SIZE_EXTENDED_SIZE]
-            .copy_from_slice(&ExtFmtChunkInfo::default_bytes());
+            .copy_from_slice(&ExtFmtChunkInfo::default_bytes(format, bits_per_sample));
         FmtChunk::from_extended_bytes(buf)
     }
 
@@ -452,16 +468,19 @@ impl ExtFmtChunkInfo {
         bytes
     }
 
-    pub const fn default_bytes() -> [u8; std::mem::size_of::<Self>()] {
+    pub const fn default_bytes(
+        format_code: FormatCode,
+        bits_per_sample: u16,
+    ) -> [u8; std::mem::size_of::<Self>()] {
         let mut bytes = [0; std::mem::size_of::<Self>()];
         let cb_size = CbSize::Base as u16;
-        let valid_bits_per_sample: i16 = 16;
         let channel_mask: i32 = 0;
-        let sub_format = FormatCode::WAV_FORMAT_PCM;
+
+        let sub_format = format_code;
         let guid = EXTENDED_FMT_GUID;
 
         let cb_size_bytes = cb_size.to_ne_bytes();
-        let valid_bits_per_sample_bytes = valid_bits_per_sample.to_ne_bytes();
+        let valid_bits_per_sample_bytes = bits_per_sample.to_ne_bytes();
         let channel_mask_bytes = channel_mask.to_ne_bytes();
         let sub_format_bytes = sub_format.to_ne_bytes();
 

@@ -34,10 +34,12 @@ pub struct ListChunk {
 }
 
 impl Chunk for ListChunk {
+    /// Returns the ID of the ListChunk - "LIST".
     fn id(&self) -> &[u8; 4] {
         &LIST
     }
 
+    /// Returns the size of the ListChunk in bytes less the size of the ID and size field itself.
     fn size(&self) -> u32 {
         let n_bytes = 4 + self
             .data
@@ -47,6 +49,7 @@ impl Chunk for ListChunk {
         n_bytes // 4 bytes for the list_type_id
     }
 
+    /// Returns the full ListChunk in bytes.
     fn as_bytes(&self) -> Box<[u8]> {
         let mut bytes = alloc_box_buffer(8 + self.size() as usize);
         bytes[0..4].copy_from_slice(&LIST); // Chunk ID
@@ -68,6 +71,7 @@ impl Chunk for ListChunk {
         bytes
     }
 
+    /// Reads the ListChunk from a reader.
     fn from_reader(
         reader: &mut Box<dyn ReadSeek>,
         info: &crate::header::HeaderChunkInfo,
@@ -111,10 +115,12 @@ impl Chunk for ListChunk {
 }
 
 impl ListChunk {
+    /// Creates a new ListChunk.
     pub(crate) fn new(list_type_id: [u8; 4], data: HashMap<InfoId, String>) -> Self {
         Self { list_type_id, data }
     }
 
+    /// Creates a new ListChunk from bytes.
     pub fn from_bytes(bytes: &[u8]) -> WaversResult<Self> {
         let list_type_id = [bytes[0], bytes[1], bytes[2], bytes[3]];
         let mut data = HashMap::new();

@@ -218,10 +218,16 @@ where
         Ok(())
     }
 
+    /// Returns the Fact chunk of the wav file if it is present.
+    /// This function will return an error if there is an issue loading the chunk.
+    /// This function will return as Some if the chunk is present and None if it is not.
     pub fn get_fact_chunk(&mut self) -> WaversResult<Option<FactChunk>> {
         self.get_chunk(FACT.into())
     }
 
+    /// Returns the List chunk of the wav file if it is present.
+    /// This function will return an error if there is an issue loading the chunk.
+    /// This function will return as Some if the chunk is present and None if it is not.
     pub fn get_list_chunk(&mut self) -> WaversResult<Option<ListChunk>> {
         self.get_chunk(LIST.into())
     }
@@ -237,10 +243,13 @@ where
         Ok(Some(chunk))
     }
 
+    /// Returns a reference to the fmt chunk of the wav file.
     pub fn get_fmt_chunk(&self) -> &FmtChunk {
         &self.wav_info.wav_header.fmt_chunk
     }
 
+    /// Returns the format of the wav file.
+    /// Includes the main format and then a sub format which is important for the extensible format.
     pub fn format(&self) -> (FormatCode, FormatCode) {
         let fmt_chunk = self.header().fmt_chunk;
         let format = fmt_chunk.format;

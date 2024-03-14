@@ -29,20 +29,24 @@ pub struct FactChunk {
 }
 
 impl FactChunk {
+    /// Creates a new FactChunk with the given number of samples.
     pub(crate) fn new(num_samples: u32) -> Self {
         Self { num_samples }
     }
 }
 
 impl Chunk for FactChunk {
+    /// Returns the ID of the FactChunk - "FACT".
     fn id(&self) -> &[u8; 4] {
         &FACT
     }
 
+    /// Returns the size of the FactChunk in bytes less the size of the ID and size field itself.
     fn size(&self) -> u32 {
         4
     }
 
+    /// Returns the full FactChunk in bytes.
     fn as_bytes(&self) -> Box<[u8]> {
         let mut buf = [0; 12];
         buf[0..4].copy_from_slice(&FACT);
@@ -51,6 +55,7 @@ impl Chunk for FactChunk {
         Box::new(buf)
     }
 
+    /// Reads the FactChunk from a reader.
     fn from_reader(
         reader: &mut Box<dyn ReadSeek>,
         info: &HeaderChunkInfo,

@@ -19,6 +19,7 @@ use crate::conversion::ConvertSlice;
 use crate::conversion::{AudioSample, ConvertTo};
 use crate::error::{WaversError, WaversResult};
 use crate::header::{read_header, ChunkIdentifier, HeaderChunkInfo, WavHeader};
+use crate::iter::{ChannelIterator, FrameIterator};
 use crate::wav_type::WavType;
 use crate::{i24, FactChunk, FmtChunk, FormatCode};
 
@@ -172,6 +173,48 @@ where
     }
 
     #[inline(always)]
+    pub fn read_sample(&mut self) -> WaversResult<T> {
+        let native_type = self.wav_info.wav_type;
+
+        let native_size_bytes: usize = native_type.n_bytes();
+
+        let mut samples = alloc_box_buffer(native_size_bytes);
+        self.reader.read_exact(&mut samples)?;
+
+        let wav_type_from_file = self.wav_info.wav_type;
+
+        match wav_type_from_file {
+            // file is encoded as i16 but we want T
+            WavType::Pcm16 | WavType::EPcm16 => {
+                let buf: [u8; 2] = [samples[0], samples[1]];
+                Ok(i16::from_ne_bytes(buf).convert_to())
+            }
+            WavType::Pcm24 | WavType::EPcm24 => {
+                let buf: [u8; 3] = [samples[0], samples[1], samples[2]];
+                Ok(i24::from_ne_bytes(buf).convert_to())
+            }
+            WavType::Pcm32 | WavType::EPcm32 => {
+                let buf: [u8; 4] = [samples[0], samples[1], samples[2], samples[3]];
+                Ok(i32::from_ne_bytes(buf).convert_to())
+            }
+            WavType::Float32 | WavType::EFloat32 => {
+                let buf: [u8; 4] = [samples[0], samples[1], samples[2], samples[3]];
+                Ok(f32::from_ne_bytes(buf).convert_to())
+            }
+            WavType::Float64 | WavType::EFloat64 => {
+                let buf: [u8; 8] = [
+                    samples[0], samples[1], samples[2], samples[3], samples[4], samples[5],
+                    samples[6], samples[7],
+                ];
+                Ok(f64::from_ne_bytes(buf).convert_to())
+            }
+        }
+    }
+
+    /// Write the audio samples contained within this wav file to a new wav file.
+    /// Writes the samples to the specified path with the given type ``F``.
+    /// The function will return an error if there is an issue writing the file.
+    #[inline(always)]
     pub fn write<F: AudioSample, P: AsRef<Path>>(&mut self, p: P) -> WaversResult<()>
     where
         T: ConvertTo<F>,
@@ -304,6 +347,53 @@ where
     pub fn wav_spec(&self) -> (u32, WavHeader) {
         let duration = self.duration();
         (duration, self.header().clone())
+    }
+
+    /// Returns the maximum position of the data chunk in the wav file.
+    pub(crate) fn max_data_pos(&self) -> u64 {
+        let info = self
+            .wav_info
+            .wav_header
+            .get_chunk_info(DATA.into())
+            .unwrap();
+        info.offset as u64 + info.size as u64
+    }
+
+    /// Returns the current position of the reader in the wav file.
+    pub(crate) fn current_pos(&mut self) -> WaversResult<u64> {
+        Ok(self.reader.seek(SeekFrom::Current(0))?)
+    }
+
+    /// Advances the position of the reader by the specified number of SAMPLES not bytes.
+    pub(crate) fn advance_pos(&mut self, advance_by: u64) -> WaversResult<u64> {
+        let native_size_bytes: i64 = self.wav_info.wav_type.n_bytes() as i64;
+        let n_bytes_to_advance = advance_by as i64 * native_size_bytes;
+        Ok(self.reader.seek(SeekFrom::Current(n_bytes_to_advance))?)
+    }
+
+    /// Moves the position of the reader to the start of the data chunk.
+    pub(crate) fn to_data(&mut self) -> WaversResult<()> {
+        let (data_offset, _) = self.header().data().into();
+        self.reader.seek(SeekFrom::Start(data_offset as u64 + 8))?;
+        Ok(())
+    }
+
+    /// Returns an iterator over the frames of the wav file. See the ``FrameIterator`` struct for more information.
+    pub fn frames(&mut self) -> FrameIterator<T> {
+        let info = self
+            .wav_info
+            .wav_header
+            .get_chunk_info(DATA.into())
+            .unwrap();
+
+        let max_pos = info.offset as u64 + info.size as u64;
+
+        FrameIterator::new(max_pos, self)
+    }
+
+    /// Returns an iterator over the channels of the wav file. See the ``ChannelIterator`` struct for more information.
+    pub fn channels(&mut self) -> ChannelIterator<T> {
+        ChannelIterator::new(self.max_data_pos(), self)
     }
 }
 
@@ -565,9 +655,6 @@ where
 mod core_tests {
     use super::*;
 
-    #[cfg(feature = "ndarray")]
-    use crate::IntoNdarray;
-
     use approx_eq::assert_approx_eq;
     use std::{io::BufRead, str::FromStr};
 
@@ -580,6 +667,8 @@ mod core_tests {
     const ONE_CHANNEL_EXPECTED_I16: &str = "./test_resources/one_channel_i16.txt";
     const ONE_CHANNEL_EXPECTED_F32: &str = "./test_resources/one_channel_f32.txt";
 
+    const MULTI_CHANNEL_WAV: &str = "./test_resources/multi_channel.wav";
+    const SIN_WAVE: &str = "./test_resources/sin_wave.wav";
     const TEST_OUTPUT: &str = "./test_resources/tmp/";
 
     #[test]
@@ -812,6 +901,33 @@ mod core_tests {
         }
 
         std::fs::remove_file(Path::new(&out_fp)).unwrap();
+    }
+
+    #[test]
+    fn channels_iter_correct() {
+        let mut wav: Wav<f32> = Wav::from_path(MULTI_CHANNEL_WAV).unwrap();
+        let channels: Vec<Samples<f32>> = wav.channels().collect();
+
+        assert_eq!(channels.len(), 69, "Expected 69 channels");
+
+        let mut wav: Wav<f32> = Wav::from_path(MULTI_CHANNEL_WAV).unwrap();
+        let channels = wav.channels();
+
+        let mut reference: Wav<f32> = Wav::from_path(SIN_WAVE).unwrap();
+
+        let reference: &[f32] = &reference.read().unwrap();
+
+        for channel in channels {
+            assert_eq!(
+                channel.len(),
+                reference.len(),
+                "Lengths not equal: Channel {}",
+                channel
+            );
+            for (expected, actual) in reference.iter().zip(channel.as_ref()) {
+                assert_approx_eq!(*expected as f64, *actual as f64, 1e-4);
+            }
+        }
     }
 
     fn read_lines<P>(filename: P) -> std::io::Result<std::io::Lines<std::io::BufReader<File>>>

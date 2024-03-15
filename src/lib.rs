@@ -14,6 +14,7 @@
 //! * Support for the Extensible format.
 //! * Increasing support for different chunks in the wav file.
 //! * Support for the ``ndarray`` crate.
+//! * Support for iteration over the frames and channels of the wav file.
 //!
 //! ## Crate Status
 //! * This crate is currently in development. Changes to the core API will either not happen or they will be kept to a minimum. Any planned additions to the API will be built on top of the existing API.
@@ -21,9 +22,7 @@
 //! * The API is tested, but there can always be more tests.
 //! * The crate has been benchmarked, but there can always be more benchmarks.
 //! * Some examples of planned features:
-//!     * Support iteration over samples in a wav file beyond calling ``iter()`` on the samples. Will providing windowing and other useful features.
 //!     * Investigate the performance of the ``write`` function.
-//!     * Channel wise iteration over samples in a wav file.
 //!     * Any suggestions or requests are welcome.
 //!
 //! ## Examples
@@ -86,8 +85,28 @@
 //!     let samples: &[f32] = &samples.convert();
 //!     write(out_fp, samples, sample_rate, n_channels).unwrap();
 //! }
-//!
 //! ```
+//! ## Iteration
+//! ``WaveRs`` provides two primary methods of iteration: Frame-wise and Channel-wise. These can be performed using the ``Wav::frames`` and ``Wav::channels`` functions respectively. Both methods return an iterator over the samples in the wav file. The ``frames`` method returns an iterator over the frames of the wav file, where a frame is a single sample from each channel. The ``channels`` method returns an iterator over the channels of the wav file, where a channel is all the samples for a single channel.
+//!
+//! ```no_run
+//! use wavers::Wav;
+//!
+//! fn main() {
+//!     let wav = Wav::from_path("path/to/two_channel.wav").unwrap();
+//!     for frame in wav.frames() {
+//!        assert_eq!(frame.len(), 2, "The frame should have two samples since the wav file has two channels");
+//!        // do something with the frame
+//!     }
+//!
+//!     for channel in wav.channels() {
+//!         // do something with the channel
+//!         assert_eq!(channel.len(), wav.n_samples() / wav.n_channels(), "The channel should have the same number of samples as the wav file divided by the number of channels");
+//!     }
+//! }
+//! ````
+//!
+//!
 //! ## Wav Utilities
 //! ```no_run
 //! use wavers::wav_spec;
@@ -98,7 +117,7 @@
 //!     println!("{:?}", wav_spec);
 //! }
 //! ```
-//!
+//! Check out [wav_inspect](https://crates.io/crates/wav_inspect) for a simnple command line tool to inspect the headers of wav files.
 //! ## Features
 //! The following section describes the features available in the WaveRs crate.
 //! ### Ndarray
@@ -130,6 +149,7 @@ mod conversion;
 mod core;
 mod error;
 mod header;
+mod iter;
 mod wav_type;
 
 use std::fmt::{self, Display};
@@ -335,14 +355,34 @@ impl FromStr for i24 {
 }
 
 impl i24 {
+    /// Returns the 24-bit integer as an i32.
     pub const fn to_i32(self) -> i32 {
         let [a, b, c] = self.data;
         i32::from_ne_bytes([a, b, c, 0])
     }
 
+    /// Returns the i32 as a 24-bit integer.
     pub const fn from_i32(n: i32) -> Self {
         let [a, b, c, _d] = i32::to_ne_bytes(n);
         Self { data: [a, b, c] }
+    }
+
+    /// Creates a 24-bit integer from a array of 3 bytes in native endian format.
+    pub const fn from_ne_bytes(bytes: [u8; 3]) -> Self {
+        let i32_result = i32::from_ne_bytes([bytes[0], bytes[1], bytes[2], 0]);
+        i24::from_i32(i32_result)
+    }
+
+    /// Creates a 24-bit integer from a array of 3 bytes in little endian format.
+    pub const fn from_le_bytes(bytes: [u8; 3]) -> Self {
+        let i32_result = i32::from_le_bytes([bytes[0], bytes[1], bytes[2], 0]);
+        i24::from_i32(i32_result)
+    }
+
+    /// Creates a 24-bit integer from a array of 3 bytes in big endian format.
+    pub const fn from_be_bytes(bytes: [u8; 3]) -> Self {
+        let i32_result = i32::from_be_bytes([bytes[0], bytes[1], bytes[2], 0]);
+        i24::from_i32(i32_result)
     }
 }
 

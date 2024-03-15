@@ -109,6 +109,26 @@ fn main() {
 }
 ```
 
+## Iteration
+``WaveRs`` provides two primary methods of iteration: Frame-wise and Channel-wise. These can be performed using the ``Wav::frames`` and ``Wav::channels`` functions respectively. Both methods return an iterator over the samples in the wav file. The ``frames`` method returns an iterator over the frames of the wav file, where a frame is a single sample from each channel. The ``channels`` method returns an iterator over the channels of the wav file, where a channel is all the samples for a single channel.
+
+```rust
+use wavers::Wav;
+
+fn main() {
+    let wav = Wav::from_path("path/to/two_channel.wav").unwrap();
+    for frame in wav.frames() {
+        assert_eq!(frame.len(), 2, "The frame should have two samples since the wav file has two channels");
+        // do something with the frame
+    }
+
+    for channel in wav.channels() {
+        // do something with the channel
+        assert_eq!(channel.len(), wav.n_samples() / wav.n_channels(), "The channel should have the same number of samples as the wav file divided by the number of channels");
+    }
+}
+````
+
 ## Wav Utilities
 
 ```rust
@@ -121,9 +141,11 @@ fn main() {
     let n_channels = wav.n_channels();
     let duration = wav.duration();
     let encoding = wav.encoding();
-    let (sample_rate, n_channels, duration, encoing) = wav_spec(fp).unwrap();
+    let (duration, header) = wav_spec(fp).unwrap();
 }
 ```
+
+Check out [wav_inspect](https://crates.io/crates/wav_inspect) for a simnple command line tool to inspect the headers of wav files.
 
 ## Features
 The following section describes the features available in the WaveRs crate. 

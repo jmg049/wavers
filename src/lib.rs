@@ -15,6 +15,7 @@
 //! * Increasing support for different chunks in the wav file.
 //! * Support for the ``ndarray`` crate.
 //! * Support for iteration over the frames and channels of the wav file.
+//! * Support for overlapping/non-overlapping windows of a wav file.
 //!
 //! ## Crate Status
 //! * This crate is currently in development. Changes to the core API will either not happen or they will be kept to a minimum. Any planned additions to the API will be built on top of the existing API.

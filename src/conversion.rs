@@ -1,6 +1,8 @@
+//! Module containing the functionality for converting between the different types of sampled audio.
+//! Support for ``i16``, ``i24``, ``i32``, ``f32`` and ``f64``.
+
 use std::fmt::Debug;
 
-/// Module containing the functionality for converting between the supported audio sample types
 use bytemuck::Pod;
 use num_traits::Num;
 
@@ -91,7 +93,6 @@ impl ConvertTo<f64> for i16 {
 }
 
 // i24 //
-
 impl ConvertTo<i16> for i24 {
     #[inline(always)]
     fn convert_to(&self) -> i16 {
@@ -250,14 +251,15 @@ mod conversion_tests {
 
     use approx_eq::assert_approx_eq;
 
+    const EXPECTED_ONE_CHANEL_I16: &str = "./test_resources/one_channel_i16.txt";
+    const EXPECTED_ONE_CHANNEL_F32: &str = "./test_resources/one_channel_f32.txt";
+
     #[test]
     fn i16_to_f32() {
-        let i16_samples: Vec<i16> =
-            read_text_to_vec(Path::new("./test_resources/one_channel_i16.txt")).unwrap();
+        let i16_samples: Vec<i16> = read_text_to_vec(Path::new(EXPECTED_ONE_CHANEL_I16)).unwrap();
         let i16_samples: &[i16] = &i16_samples;
 
-        let f32_samples: Vec<f32> =
-            read_text_to_vec(Path::new("./test_resources/one_channel_f32.txt")).unwrap();
+        let f32_samples: Vec<f32> = read_text_to_vec(Path::new(EXPECTED_ONE_CHANNEL_F32)).unwrap();
         let f32_samples: &[f32] = &f32_samples;
         for (expected_sample, actual_sample) in f32_samples.iter().zip(i16_samples) {
             let actual_sample: f32 = actual_sample.convert_to();
@@ -267,11 +269,9 @@ mod conversion_tests {
 
     #[test]
     fn i16_to_f32_slice() {
-        let i16_samples: Vec<i16> =
-            read_text_to_vec(Path::new("./test_resources/one_channel_i16.txt")).unwrap();
+        let i16_samples: Vec<i16> = read_text_to_vec(Path::new(EXPECTED_ONE_CHANEL_I16)).unwrap();
         let i16_samples: Box<[i16]> = i16_samples.into_boxed_slice();
-        let f32_samples: Vec<f32> =
-            read_text_to_vec(Path::new("./test_resources/one_channel_f32.txt")).unwrap();
+        let f32_samples: Vec<f32> = read_text_to_vec(Path::new(EXPECTED_ONE_CHANNEL_F32)).unwrap();
 
         let f32_samples: &[f32] = &f32_samples;
         let converted_i16_samples: Box<[f32]> = i16_samples.convert_slice();
@@ -285,12 +285,10 @@ mod conversion_tests {
 
     #[test]
     fn f32_to_i16() {
-        let i16_samples: Vec<i16> =
-            read_text_to_vec(Path::new("./test_resources/one_channel_i16.txt")).unwrap();
+        let i16_samples: Vec<i16> = read_text_to_vec(Path::new(EXPECTED_ONE_CHANEL_I16)).unwrap();
         let i16_samples: &[i16] = &i16_samples;
 
-        let f32_samples: Vec<f32> =
-            read_text_to_vec(Path::new("./test_resources/one_channel_f32.txt")).unwrap();
+        let f32_samples: Vec<f32> = read_text_to_vec(Path::new(EXPECTED_ONE_CHANNEL_F32)).unwrap();
 
         let f32_samples: &[f32] = &f32_samples;
         for (expected_sample, actual_sample) in i16_samples.iter().zip(f32_samples) {

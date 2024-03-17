@@ -216,6 +216,141 @@ where
     }
 }
 
+/// A window iterator for a wav file.
+/// Iterates over the wav file in either overlapping or non-overlapping windows.
+/// This should be accessed by either the ``Wav::windows`` function or ``Wav::windows_overlapping`` functon.
+pub struct WindowIterator<'a, T: 'a + AudioSample>
+where
+    i16: ConvertTo<T>,
+    i24: ConvertTo<T>,
+    i32: ConvertTo<T>,
+    f32: ConvertTo<T>,
+    f64: ConvertTo<T>,
+    Box<[i16]>: ConvertSlice<T>,
+    Box<[i24]>: ConvertSlice<T>,
+    Box<[i32]>: ConvertSlice<T>,
+    Box<[f32]>: ConvertSlice<T>,
+    Box<[f64]>: ConvertSlice<T>,
+{
+    max_pos: u64,
+    wav: &'a mut Wav<T>,
+    window_size: u64,
+    overlap: u64,
+    offsets: Vec<u64>,
+    current_offset: usize,
+    remaining_window_size: u64,
+}
+
+impl<'a, T: 'a + T> WindowIterator<'a, T> {
+    pub fn new(
+        max_pos: u64,
+        wav: &'a mut Wav<T>,
+        window_size: u64,
+        overlap: u64,
+    ) -> WaversResult<Self> {
+        match window_size > wav.n_samples() {
+            false => (),
+            true => return Err(WaversError::InvalidWindowSize(wav.n_samples, window_size)),
+        }
+
+        match overlap > window_size {
+            false => (),
+            true => return Err(WaversError::InvalidWindowOverlap(window_size, overlap)),
+        }
+
+        let remaining_window_size = 0;
+
+        Ok(Self {
+            max_pos,
+            wav,
+            window_size,
+            overlap,
+            offsets: calc_offsets(wav.n_samples(), window_size, overlap),
+            current_offset: 0,
+            remaining_window_size,
+        })
+    }
+
+    pub(crate) fn new_no_overlap(
+        max_pos: u64,
+        wav: &'a mut Wav<T>,
+        window_size: u64,
+    ) -> WaversResult<Self> {
+        Self::new(max_pos, wav, window_size, 0)
+    }
+
+    // n = (k - r) * m + r
+    // where    n = number of samples
+    //          k = window length
+    //          m = number of windows
+    //          r = size of overlap
+    //
+    // Rearranging
+    // m = (n - r) / (k - r)
+    #[inline(always)]
+    fn calc_n_overlapping_windows(n: u64, k: u64, r: u64) -> u64 {
+        (n - r) / (k - r)
+    }
+
+    fn calc_offsets(n: u64, k: u64, r: u64) -> Vec<u64> {
+        let total_offsets = WindowIterator::calc_n_overlapping_windows(n, k, r);
+        let mut offsets = Vec::with_capacity(total_offsets);
+        for i in 0..total_offsets {
+            offsets.push(i * self.window_size - self.overlap);
+        }
+        offsets
+    }
+}
+
+impl<'a, T: 'a + AudioSample> Iterator for WindowIterator<'a, T> {
+    type Item = Samples<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let current_pos: u64 = match self.wav.current_pos() {
+            Ok(pos) => pos,
+            Err(_) => {
+                match self.wav.to_data() {
+                    Ok(_) => (),
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                    }
+                }
+                return None;
+            }
+        };
+
+        if current_pos >= self.max_pos {
+            match self.wav.to_data() {
+                Ok(_) => (),
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                }
+            }
+            return None;
+        }
+
+        if current_pos + (window_size * std::mem::size_of::<T>()) > self.max_pos {
+            match self.wav.to_data() {
+                Ok(_) => (),
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                }
+            }
+            return None;
+        }
+
+        let current_offset = self.current_offset;
+        let offset_pos = self.offsets[current_offset];
+        self.wav.to_pos_within_data(offset_pos)?;
+        let samples: Samples<T> = match wav.read_samples(self.window_size) {
+            Ok(s) => s,
+            Err(e) => return None,
+        };
+
+        Some(samples)
+    }
+}
+
 #[cfg(test)]
 mod iter_tests {
     use crate::DATA;
@@ -223,6 +358,24 @@ mod iter_tests {
     use super::*;
 
     const TWO_CHANNEL_WAV_I16: &str = "./test_resources/two_channel_i16.wav";
+
+    #[test]
+    fn test_calc_n_overlapping_windows() {
+        let data = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let n_windows = WindowIterator::calc_n_overlapping_windows(data.len() as u64, 2, 0);
+        assert_eq!(
+            n_windows,
+            4,
+            "Full data of length 8 should have 4 non-overlapping window of length 2. Expected {} got {}", 4, n_windows
+        );
+
+        let n_windows = WindowIterator::calc_n_overlapping_windows(data.len() as u64, 2, 1);
+        assert_eq!(
+            n_windows, 7,
+            "There should be 4 non-overlappig windows + 3 overlapping windows, expected {} got {}",
+            7, n_windows
+        );
+    }
 
     #[test]
     fn test_frame_iterator() {

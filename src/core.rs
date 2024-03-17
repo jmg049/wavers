@@ -19,7 +19,7 @@ use crate::conversion::ConvertSlice;
 use crate::conversion::{AudioSample, ConvertTo};
 use crate::error::{WaversError, WaversResult};
 use crate::header::{read_header, ChunkIdentifier, HeaderChunkInfo, WavHeader};
-use crate::iter::{ChannelIterator, FrameIterator};
+use crate::iter::{ChannelIterator, FrameIterator, WindowIterator};
 use crate::wav_type::WavType;
 use crate::{i24, FactChunk, FmtChunk, FormatCode};
 
@@ -372,9 +372,18 @@ where
     }
 
     /// Moves the position of the reader to the start of the data chunk.
+    #[inline(always)]
     pub(crate) fn to_data(&mut self) -> WaversResult<()> {
         let (data_offset, _) = self.header().data().into();
         self.reader.seek(SeekFrom::Start(data_offset as u64 + 8))?;
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub(crate) fn to_pos_within_data(&mut self, pos: u64) -> WaversResult<()> {
+        let (data_offset, _) = self.header().data().into();
+        self.reader
+            .seek(SeekFrom::Start(data_offset as u64 + 8 + pos))?;
         Ok(())
     }
 
@@ -394,6 +403,20 @@ where
     /// Returns an iterator over the channels of the wav file. See the ``ChannelIterator`` struct for more information.
     pub fn channels(&mut self) -> ChannelIterator<T> {
         ChannelIterator::new(self.max_data_pos(), self)
+    }
+
+    /// Returns a windowed iterator of the data in the wav file. See the ``WindowsIterator`` struct for more information.
+    pub fn windows(&mut self, window_size: u64) -> Result<WindowIterator<T>> {
+        WindowIterator::new_no_overlap(self.max_data_pos(), self, window_size)
+    }
+
+    /// Returns a overlapping windowed iterator of the data in the wav file. See the ``WindowsIterator`` struct for more information.
+    pub fn windows_overlapping(
+        &mut self,
+        window_size: u64,
+        overlap: u64,
+    ) -> Result<WindowIterator<T>> {
+        WindowIterator::new(self.max_data_pos(), self, window_size, overlap)
     }
 }
 

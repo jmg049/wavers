@@ -1,4 +1,6 @@
 //! Module containing the error types for Wavers
+use core::error;
+
 use thiserror::Error;
 
 use crate::{FormatCode, WavType};
@@ -27,6 +29,10 @@ pub enum WaversError {
     UTF8Error(#[from] std::str::Utf8Error),
     #[error("Unsupported write format ({0}, {1})")]
     UnsupportedWriteFormat(FormatCode, FormatCode),
+    #[error("Invalid overlap size for window iterator: Window Size {0}, Overlap {1}")]
+    InvalidWindowOverlap(u64, u64),
+    #[error("Invalid window size with respect to number of samples: Number of Samples {0}, Window Size: {1}")]
+    InvalidWindowSize(u64, u64),
     #[cfg(feature = "ndarray")]
     #[error("IO error with ndarray")]
     NdArrayError(#[from] ndarray::ShapeError),

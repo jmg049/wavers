@@ -441,7 +441,7 @@ where
 
         let copied_data: &[T] = &self.read()?.samples;
         let length = copied_data.len();
-        let shape = (length / n_channels, n_channels);
+        let shape = (n_channels, length / n_channels); // correct format (as per everyone else) is n_channels, n_samples
 
         let arr: Array2<T> = Array::from_shape_vec(shape, copied_data.to_vec())?;
         Ok((arr, self.sample_rate()))
@@ -465,7 +465,7 @@ where
         let copied_data: &[T] = &copied_data;
         let length = copied_data.len();
 
-        let shape = (length / n_channels, n_channels);
+        let shape = (n_channels, length / n_channels); // correct format (as per everyone else) is n_channels, n_samples
         let arr: Array2<T> = Array::from_shape_vec(shape, copied_data.to_vec())?;
         Ok((arr, self.sample_rate()))
     }
@@ -566,6 +566,18 @@ where
     }
 }
 
+#[cfg(feature = "ndarray")]
+impl<T> From<Array2<T>> for Samples<T>
+where
+    T: AudioSample,
+{
+    fn from(value: Array2<T>) -> Self {
+        Samples {
+            samples: value.into_raw_vec().into_boxed_slice(),
+        }
+    }
+}
+
 impl<T> Display for Samples<T>
 where
     T: AudioSample + Debug,
@@ -654,9 +666,12 @@ where
 #[cfg(test)]
 mod core_tests {
     use super::*;
+    use std::{io::BufRead, str::FromStr};
 
     use approx_eq::assert_approx_eq;
-    use std::{io::BufRead, str::FromStr};
+
+    #[cfg(feature = "ndarray")]
+    use ndarray::arr2;
 
     const ONE_CHANNEL_WAV_I16: &str = "./test_resources/one_channel_i16.wav";
     const TWO_CHANNEL_WAV_I16: &str = "./test_resources/two_channel_i16.wav";
@@ -725,7 +740,7 @@ mod core_tests {
 
         let expected_wav: Vec<i16> = read_text_to_vec(Path::new(ONE_CHANNEL_EXPECTED_I16)).unwrap();
 
-        let (arr, sr) = wav.into_ndarray().unwrap();
+        let (arr, _) = wav.into_ndarray().unwrap();
         assert_eq!(arr.shape()[0], 1, "Expected 1 channels");
         for (expected, actual) in expected_wav.iter().zip(arr) {
             assert_eq!(*expected, actual, "{} != {}", expected, actual);
@@ -746,10 +761,71 @@ mod core_tests {
 
         let expected_wav = new_expected;
 
-        let (two_channel_arr, sr): (Array2<i16>, i32) = wav.into_ndarray().unwrap();
+        let (two_channel_arr, _): (Array2<i16>, i32) = wav.into_ndarray().unwrap();
         assert_eq!(two_channel_arr.shape()[0], 2, "Expected 2 channels");
         for (expected, actual) in expected_wav.iter().zip(two_channel_arr) {
             assert_eq!(*expected, actual, "{} != {}", expected, actual);
+        }
+    }
+
+    #[cfg(feature = "ndarray")]
+    #[test]
+    fn ndarray_to_samples() {
+        let data = arr2(&[[1, 2, 3], [4, 5, 6]]);
+        let samples: Samples<i16> = Samples::from(data);
+        for i in 1..7 {
+            assert_eq!(
+                samples[i - 1],
+                i as i16,
+                "Expected {} but got {}",
+                i,
+                samples[i - 1]
+            );
+        }
+
+        let wav: Wav<i16> = Wav::from_path(TWO_CHANNEL_WAV_I16).expect("Failed to open file");
+        let expected_wav: Vec<i16> = read_text_to_vec(Path::new(ONE_CHANNEL_EXPECTED_I16)).unwrap();
+        let mut new_expected = Vec::with_capacity(expected_wav.len() * 2);
+        for sample in expected_wav {
+            new_expected.push(sample);
+            new_expected.push(sample);
+        }
+        let expected_wav = new_expected;
+
+        let (arr, _) = wav.into_ndarray().expect("Failed to convert to ndarray");
+        let samples: Samples<i16> = Samples::from(arr);
+
+        assert_eq!(samples.len(), expected_wav.len(), "Lengths not equal");
+
+        for (expected, actual) in expected_wav.iter().zip(samples.iter()) {
+            assert_eq!(*expected, *actual, "{} != {}", expected, actual);
+        }
+
+        let wav: Wav<f32> = Wav::from_path(MULTI_CHANNEL_WAV).expect("Failed to open file");
+        let n_channels = wav.n_channels() as usize;
+        let (arr, _) = wav.into_ndarray().expect("Failed to convert to ndarray");
+        let samples: Samples<f32> = Samples::from(arr);
+
+        let mut expected_samples: Wav<f32> =
+            Wav::from_path(SIN_WAVE).expect("Failed to open sin wave");
+        let expected_samples: Vec<f32> = expected_samples
+            .read()
+            .expect("Failed to read sin wave")
+            .to_vec();
+        // the sin wave file is 1 channel and needs to be interleaved for the number of channels in the multi channel file
+        let mut new_expected = Vec::with_capacity(expected_samples.len() * n_channels);
+        for sample in expected_samples {
+            for _ in 0..n_channels {
+                new_expected.push(sample);
+            }
+        }
+
+        let expected_samples = new_expected;
+
+        assert_eq!(samples.len(), expected_samples.len(), "Lengths not equal");
+
+        for (expected, actual) in expected_samples.iter().zip(samples.iter()) {
+            assert_approx_eq!(*expected as f64, *actual as f64, 1e-4);
         }
     }
 

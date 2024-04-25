@@ -125,7 +125,7 @@
 //! The ``ndarray`` feature is used to provide functions that allow wav files to be read as ``ndarray`` 2-D arrays (samples x channels). There are two functions provided, ``into_ndarray`` and ``as_ndarray``. ``into_ndarray`` consumes the samples and ``as_ndarray`` creates a ``Array2`` from the samples.
 //!
 //! ```no_run
-//! use wavers::{read, Wav, AsNdarray, IntoNdarray};
+//! use wavers::{read, Wav, AsNdarray, IntoNdarray, Samples};
 //! use ndarray::{Array2, CowArray2};
 //!
 //! fn main() {
@@ -135,8 +135,11 @@
 //!     // does not consume the wav file struct
 //! 	let (i16_array, sample_rate): (Array2<i16>, i32) = wav.as_ndarray().unwrap();
 //!     
-//!    // consumes the wav file struct
+//!     // consumes the wav file struct
 //! 	let (i16_array, sample_rate): (Array2<i16>, i32) = wav.into_ndarray().unwrap();
+//!
+//!     // convert the array to samples.
+//!     let samples: Samples<i16> = Samples::from(i16_array);
 //! }
 //! ```
 //!

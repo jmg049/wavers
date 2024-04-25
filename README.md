@@ -167,6 +167,9 @@ fn main() {
     
    	// consumes the wav file struct
 	let (i16_array, sample_rate): (Array2<i16>, i32) = wav.into_ndarray().unwrap();
+
+    // convert the array to samples.
+    let samples: Samples<i16> = Samples::from(i16_array);
 }
 ```
 

@@ -366,7 +366,8 @@ where
         self.seek_by_samples(duration_in_samples)
     }
 
-    pub(crate) fn seek_by_bytes(&mut self, n_bytes: i64) -> WaversResult<u64> {
+    /// From the current seek position, seek forward by n bytes. If the number of bytes goes beyond the max number of bytes in the DATA chunk, the function will return an error.
+    pub fn seek_by_bytes(&mut self, n_bytes: i64) -> WaversResult<u64> {
         let max_pos = self.max_data_pos();
         let current_pos = self.current_pos()?;
         if current_pos + n_bytes as u64 > max_pos {
@@ -380,7 +381,7 @@ where
     }
 
     /// Returns the maximum position of the data chunk in the wav file.
-    pub(crate) fn max_data_pos(&self) -> u64 {
+    pub fn max_data_pos(&self) -> u64 {
         let info = self
             .wav_info
             .wav_header
@@ -390,12 +391,12 @@ where
     }
 
     /// Returns the current position of the reader in the wav file.
-    pub(crate) fn current_pos(&mut self) -> WaversResult<u64> {
+    pub fn current_pos(&mut self) -> WaversResult<u64> {
         Ok(self.reader.seek(SeekFrom::Current(0))?)
     }
 
     /// Moves the position of the reader to the start of the data chunk.
-    pub(crate) fn to_data(&mut self) -> WaversResult<()> {
+    pub fn to_data(&mut self) -> WaversResult<()> {
         let (data_offset, _) = self.header().data().into();
         self.reader.seek(SeekFrom::Start(data_offset as u64 + 8))?;
         Ok(())

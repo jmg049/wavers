@@ -111,9 +111,9 @@ where
     Box<[f32]>: ConvertSlice<T>,
     Box<[f64]>: ConvertSlice<T>,
 {
-    max_pos: u64,
     wav: &'a mut Wav<T>,
     current_channel: usize,
+    n_samples_per_channel: usize,
 }
 
 impl<'a, T: 'a + AudioSample> ChannelIterator<'a, T>
@@ -129,11 +129,12 @@ where
     Box<[f32]>: ConvertSlice<T>,
     Box<[f64]>: ConvertSlice<T>,
 {
-    pub fn new(max_pos: u64, wav: &'a mut Wav<T>) -> ChannelIterator<'a, T> {
+    pub fn new(wav: &'a mut Wav<T>) -> ChannelIterator<'a, T> {
+        let n_samples_per_channel = wav.n_samples() as usize / wav.n_channels() as usize;
         ChannelIterator {
-            max_pos,
             wav,
             current_channel: 0,
+            n_samples_per_channel: n_samples_per_channel,
         }
     }
 }
@@ -154,20 +155,10 @@ where
     type Item = Samples<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let current_pos = match self.wav.current_pos() {
-            Ok(pos) => pos,
-            Err(_) => {
-                match self.wav.to_data() {
-                    Ok(_) => (),
-                    Err(e) => {
-                        eprintln!("Error: {}", e);
-                    }
-                }
-                return None;
-            }
-        };
+        let n_channels = self.wav.n_channels() as u64;
+        let current_channel = self.current_channel as u64;
 
-        if current_pos >= self.max_pos {
+        if current_channel >= n_channels {
             match self.wav.to_data() {
                 Ok(_) => (),
                 Err(e) => {
@@ -177,41 +168,37 @@ where
             return None;
         }
 
-        let n_channels = self.wav.n_channels() as usize;
-
-        if self.current_channel >= n_channels {
-            return None;
-        }
-
-        let total_n_samples = self.wav.n_samples() as usize;
-        let samples_per_channel = total_n_samples / n_channels;
-
-        let mut samples: Box<[T]> = alloc_sample_buffer(samples_per_channel);
-
-        match self.wav.advance_pos(self.current_channel as u64) {
+        // Seek to the start of the channel.
+        // Since we just seeked to the start, we can seek by the current channel (samples) to get to the next channel.
+        match self.wav.seek_by_samples(current_channel) {
             Ok(_) => (),
             Err(_) => return None,
         }
+        let mut samples: Box<[T]> = alloc_sample_buffer(self.n_samples_per_channel);
 
-        for i in 0..samples_per_channel {
-            let channel_samples: T = match self.wav.read_sample() {
+        for i in 0..self.n_samples_per_channel {
+            // read a sample
+            let sample: T = match self.wav.read_sample() {
                 Ok(frame) => frame,
-                Err(_) => return None,
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    return None;
+                }
             };
-            match self.wav.advance_pos(n_channels as u64 - 1) {
+            samples[i] = sample;
+            // seek to the next sample in the channel, if we go beyond the data chunk, break. This is indicated by the error.
+            match self.wav.seek_by_samples(n_channels - 1) {
                 Ok(_) => (),
-                Err(_) => return None,
+                Err(_) => {
+                    break;
+                }
             }
-            samples[i] = channel_samples;
         }
-
         self.current_channel += 1;
-
         match self.wav.to_data() {
             Ok(_) => (),
             Err(_) => return None,
         }
-
         Some(Samples::from(samples))
     }
 }
@@ -276,8 +263,7 @@ mod iter_tests {
     #[test]
     fn test_channel_iterator() {
         let mut wav = Wav::<i16>::from_path(TWO_CHANNEL_WAV_I16).unwrap();
-        let max_pos = wav.max_data_pos();
-        let channel_iter = ChannelIterator::new(max_pos, &mut wav);
+        let channel_iter = ChannelIterator::new(&mut wav);
 
         let mut shadow_wav = Wav::<i16>::from_path(TWO_CHANNEL_WAV_I16).unwrap();
         let data: Samples<i16> = shadow_wav.read().unwrap();

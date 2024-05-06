@@ -21,10 +21,12 @@ pub enum WaversError {
     InvalidBitsPerSample(u16),
     #[error("Invalid type id given: {0}")]
     InvalidTypeId(String),
-    #[error("IO error with file{0}")]
+    #[error("IO error with file: {0}")]
     IOError(#[from] std::io::Error),
     #[error("FromUTF8 Error {0}")]
     UTF8Error(#[from] std::str::Utf8Error),
+    #[error("Invalid seek position: Current Position {0} | Max Data Position {1} | Attempted to read {2} bytes")]
+    InvalidSeekOperation(u64, u64, u64),
     #[error("Unsupported write format ({0}, {1})")]
     UnsupportedWriteFormat(FormatCode, FormatCode),
     #[cfg(feature = "ndarray")]

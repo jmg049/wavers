@@ -6,6 +6,7 @@ use std::fs::File;
 use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
+use std::time::Duration;
 
 use bytemuck::cast_slice;
 
@@ -349,6 +350,35 @@ where
         (duration, self.header().clone())
     }
 
+    #[inline(always)]
+    /// From the current seek position, seek forward by n samples. If the number of samples goes beyond the max number of samples in the DATA chunk, the function will return an error.
+    pub fn seek_by_samples(&mut self, n_samples: u64) -> WaversResult<u64> {
+        let n_sample_bytes = n_samples as usize * self.wav_info.wav_type.n_bytes();
+
+        self.seek_by_bytes(n_sample_bytes as i64)
+    }
+
+    #[inline(always)]
+    /// From the current seek position, seek forward by some duration. If the duration goes beyond the end of the max number of samples in the DATA chunk, the function will return an error.
+    pub fn seek_by_duration(&mut self, duration: Duration) -> WaversResult<u64> {
+        let duration_in_samples =
+            duration.as_secs() * self.sample_rate() as u64 * self.n_channels() as u64;
+        self.seek_by_samples(duration_in_samples)
+    }
+
+    pub(crate) fn seek_by_bytes(&mut self, n_bytes: i64) -> WaversResult<u64> {
+        let max_pos = self.max_data_pos();
+        let current_pos = self.current_pos()?;
+        if current_pos + n_bytes as u64 > max_pos {
+            return Err(WaversError::InvalidSeekOperation(
+                current_pos,
+                max_pos,
+                n_bytes as u64,
+            ));
+        }
+        Ok(self.reader.seek(SeekFrom::Current(n_bytes))?)
+    }
+
     /// Returns the maximum position of the data chunk in the wav file.
     pub(crate) fn max_data_pos(&self) -> u64 {
         let info = self
@@ -356,19 +386,12 @@ where
             .wav_header
             .get_chunk_info(DATA.into())
             .unwrap();
-        info.offset as u64 + info.size as u64
+        info.offset as u64 + info.size as u64 + 8
     }
 
     /// Returns the current position of the reader in the wav file.
     pub(crate) fn current_pos(&mut self) -> WaversResult<u64> {
         Ok(self.reader.seek(SeekFrom::Current(0))?)
-    }
-
-    /// Advances the position of the reader by the specified number of SAMPLES not bytes.
-    pub(crate) fn advance_pos(&mut self, advance_by: u64) -> WaversResult<u64> {
-        let native_size_bytes: i64 = self.wav_info.wav_type.n_bytes() as i64;
-        let n_bytes_to_advance = advance_by as i64 * native_size_bytes;
-        Ok(self.reader.seek(SeekFrom::Current(n_bytes_to_advance))?)
     }
 
     /// Moves the position of the reader to the start of the data chunk.
@@ -393,7 +416,7 @@ where
 
     /// Returns an iterator over the channels of the wav file. See the ``ChannelIterator`` struct for more information.
     pub fn channels(&mut self) -> ChannelIterator<T> {
-        ChannelIterator::new(self.max_data_pos(), self)
+        ChannelIterator::new(self)
     }
 }
 
@@ -700,6 +723,92 @@ mod core_tests {
         assert_eq!(duration, 10, "Expected duration of 10 seconds");
     }
 
+    #[test]
+    pub fn seek_by_samples() {
+        let mut wav: Wav<i16> = Wav::from_path(ONE_CHANNEL_WAV_I16).unwrap();
+        let sample_rate = wav.sample_rate() as usize;
+        let n_channels = wav.n_channels() as usize;
+
+        let expected_samples: Vec<i16> =
+            read_text_to_vec(Path::new(ONE_CHANNEL_EXPECTED_I16)).unwrap();
+        let expected_samples = expected_samples[2 * sample_rate * n_channels..].to_vec();
+
+        wav.seek_by_samples((2 * sample_rate * n_channels) as u64)
+            .expect("Failed to seek");
+
+        let actual = wav.read().expect("Failed to read samples");
+        assert_eq!(actual.len(), expected_samples.len(), "Lengths not equal");
+        for (expected, actual) in expected_samples.iter().zip(actual.iter()) {
+            assert_eq!(*expected, *actual, "{} != {}", expected, actual);
+        }
+
+        let mut wav: Wav<i16> = Wav::from_path(TWO_CHANNEL_WAV_I16).unwrap();
+        let sample_rate = wav.sample_rate() as usize;
+        let n_channels = wav.n_channels() as usize;
+
+        let expected_samples =
+            read_text_to_vec::<i16>(Path::new(ONE_CHANNEL_EXPECTED_I16)).unwrap();
+        let mut new_expected = Vec::with_capacity(expected_samples.len() * 2);
+        for sample in expected_samples {
+            new_expected.push(sample);
+            new_expected.push(sample);
+        }
+        let expected_samples = new_expected;
+
+        let expected_samples = expected_samples[2 * sample_rate * n_channels..].to_vec();
+
+        wav.seek_by_samples((2 * sample_rate * n_channels) as u64)
+            .expect("Failed to seek");
+
+        let actual = wav.read().expect("Failed to read samples");
+        assert_eq!(actual.len(), expected_samples.len(), "Lengths not equal");
+        for (expected, actual) in expected_samples.iter().zip(actual.iter()) {
+            assert_eq!(*expected, *actual, "{} != {}", expected, actual);
+        }
+    }
+
+    #[test]
+    pub fn seek_by_duration() {
+        let mut wav: Wav<i16> = Wav::from_path(ONE_CHANNEL_WAV_I16).unwrap();
+        let sample_rate = wav.sample_rate() as usize;
+        let n_channels = wav.n_channels() as usize;
+
+        let expected_samples: Vec<i16> =
+            read_text_to_vec(Path::new(ONE_CHANNEL_EXPECTED_I16)).unwrap();
+        let expected_samples = expected_samples[2 * sample_rate * n_channels..].to_vec();
+
+        wav.seek_by_duration(Duration::from_secs(2))
+            .expect("Failed to seek");
+
+        let actual = wav.read().expect("Failed to read samples");
+        assert_eq!(actual.len(), expected_samples.len(), "Lengths not equal");
+        for (expected, actual) in expected_samples.iter().zip(actual.iter()) {
+            assert_eq!(*expected, *actual, "{} != {}", expected, actual);
+        }
+
+        let mut wav: Wav<i16> = Wav::from_path(TWO_CHANNEL_WAV_I16).unwrap();
+        let sample_rate = wav.sample_rate() as usize;
+        let n_channels = wav.n_channels() as usize;
+
+        let expected_samples =
+            read_text_to_vec::<i16>(Path::new(ONE_CHANNEL_EXPECTED_I16)).unwrap();
+        let mut new_expected = Vec::with_capacity(expected_samples.len() * 2);
+        for sample in expected_samples {
+            new_expected.push(sample);
+            new_expected.push(sample);
+        }
+        let expected_samples = new_expected;
+
+        let expected_samples = expected_samples[2 * sample_rate * n_channels..].to_vec();
+        wav.seek_by_duration(Duration::from_secs(2))
+            .expect("Failed to seek");
+        let actual = wav.read().expect("Failed to read samples");
+        assert_eq!(actual.len(), expected_samples.len(), "Lengths not equal");
+        for (expected, actual) in expected_samples.iter().zip(actual.iter()) {
+            assert_eq!(*expected, *actual, "{} != {}", expected, actual);
+        }
+    }
+
     /// Test that the number of samples is correct after converting.
     /// The wav file used is encoded as PCM_16 and has 2048 samples
     /// Comes from https://github.com/jmg049/wavers/issues/9
@@ -983,7 +1092,6 @@ mod core_tests {
     fn channels_iter_correct() {
         let mut wav: Wav<f32> = Wav::from_path(MULTI_CHANNEL_WAV).unwrap();
         let channels: Vec<Samples<f32>> = wav.channels().collect();
-
         assert_eq!(channels.len(), 69, "Expected 69 channels");
 
         let mut wav: Wav<f32> = Wav::from_path(MULTI_CHANNEL_WAV).unwrap();

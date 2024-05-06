@@ -413,8 +413,8 @@ use numpy::Element;
 unsafe impl Element for i24 {
     const IS_COPY: bool = true;
 
-    fn get_dtype<'py>(py: Python<'py>) -> &'py numpy::PyArrayDescr {
-        numpy::dtype::<i24>(py)
+    fn get_dtype_bound(py: Python<'_>) -> Bound<'_, numpy::PyArrayDescr> {
+        numpy::dtype_bound::<i24>(py)
     }
 }
 

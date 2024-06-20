@@ -465,7 +465,7 @@ where
 
         let copied_data: &[T] = &self.read()?.samples;
         let length = copied_data.len();
-        let shape = (n_channels, length / n_channels); // correct format (as per everyone else) is n_channels, n_samples
+        let shape = (length / n_channels, n_channels); // correct format (as per everyone else) is n_channels, n_samples
 
         let arr: Array2<T> = Array::from_shape_vec(shape, copied_data.to_vec())?;
         Ok((arr, self.sample_rate()))
@@ -489,7 +489,7 @@ where
         let copied_data: &[T] = &copied_data;
         let length = copied_data.len();
 
-        let shape = (n_channels, length / n_channels); // correct format (as per everyone else) is n_channels, n_samples
+        let shape = (length / n_channels, n_channels); // correct format (as per everyone else) is n_channels, n_samples
         let arr: Array2<T> = Array::from_shape_vec(shape, copied_data.to_vec())?;
         Ok((arr, self.sample_rate()))
     }
@@ -851,7 +851,7 @@ mod core_tests {
         let expected_wav: Vec<i16> = read_text_to_vec(Path::new(ONE_CHANNEL_EXPECTED_I16)).unwrap();
 
         let (arr, _) = wav.into_ndarray().unwrap();
-        assert_eq!(arr.shape()[0], 1, "Expected 1 channels");
+        assert_eq!(arr.shape()[1], 1, "Expected 1 channels");
         for (expected, actual) in expected_wav.iter().zip(arr) {
             assert_eq!(*expected, actual, "{} != {}", expected, actual);
         }
@@ -872,7 +872,7 @@ mod core_tests {
         let expected_wav = new_expected;
 
         let (two_channel_arr, _): (Array2<i16>, i32) = wav.into_ndarray().unwrap();
-        assert_eq!(two_channel_arr.shape()[0], 2, "Expected 2 channels");
+        assert_eq!(two_channel_arr.shape()[1], 2, "Expected 2 channels");
         for (expected, actual) in expected_wav.iter().zip(two_channel_arr) {
             assert_eq!(*expected, actual, "{} != {}", expected, actual);
         }

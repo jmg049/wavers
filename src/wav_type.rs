@@ -158,9 +158,7 @@ impl Display for WavType {
 }
 
 /// Converts a tuple of format codes and bits per sample to a WavType.
-pub(crate) const fn format_info_to_wav_type(
-    info: (FormatCode, u16, FormatCode),
-) -> WaversResult<WavType> {
+pub const fn format_info_to_wav_type(info: (FormatCode, u16, FormatCode)) -> WaversResult<WavType> {
     Ok(match info {
         (FormatCode::WAV_FORMAT_PCM, PCM_16_BITS, _) => WavType::Pcm16,
         (FormatCode::WAV_FORMAT_PCM, PCM_24_BITS, _) => WavType::Pcm24,
@@ -187,7 +185,7 @@ pub(crate) const fn format_info_to_wav_type(
 }
 
 /// Converts a WavType to a tuple of format codes and bits per sample.
-pub(crate) const fn wav_type_to_format_info(wav_type: WavType) -> (FormatCode, u16, FormatCode) {
+pub const fn wav_type_to_format_info(wav_type: WavType) -> (FormatCode, u16, FormatCode) {
     match wav_type {
         WavType::Pcm16 => (
             FormatCode::WAV_FORMAT_PCM,

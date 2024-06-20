@@ -169,7 +169,7 @@ pub use crate::chunks::{FactChunk, FmtChunk, ListChunk, DATA, FACT, LIST, RIFF, 
 pub use crate::core::{wav_spec, ReadSeek, Samples, Wav};
 pub use crate::error::{WaversError, WaversResult};
 pub use crate::header::WavHeader;
-pub use crate::wav_type::{FormatCode, WavType};
+pub use crate::wav_type::{format_info_to_wav_type, wav_type_to_format_info, FormatCode, WavType};
 
 /// Reads a wav file and returns the samples and the sample rate.
 ///

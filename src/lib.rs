@@ -291,7 +291,7 @@ use num_traits::{Num, One, Zero};
 #[allow(non_camel_case_types)]
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-#[cfg(not(feature = "pyo3"))]
+#[cfg_attr(feature = "pyo3", pyclass)]
 /// An experimental 24-bit unsigned integer type.
 ///
 /// This type is a wrapper around ``[u8; 3]`` and is used to represent 24-bit audio samples.
@@ -301,15 +301,6 @@ use num_traits::{Num, One, Zero};
 /// Supports basic arithmetic operations and conversions to and from ``i32``.
 /// The [AudioSample](wavers::core::AudioSample) trait is implemented for this type and so are the [ConvertTo](wavers::core::ConvertTo) and [ConvertSlice](wavers::core::ConvertSlice) traits.
 ///
-pub struct i24 {
-    pub data: [u8; 3],
-}
-
-#[allow(non_camel_case_types)]
-#[repr(C)]
-#[cfg(feature = "pyo3")]
-#[pyclass]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct i24 {
     pub data: [u8; 3],
 }

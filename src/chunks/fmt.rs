@@ -21,9 +21,9 @@ pub const EXT_FORMAT_CODE: u16 = 0xFFFE;
 
 /// The format chunk of a wav file. This chunk contains information about the format of the audio data.
 /// This chunk must be present in a wav file.
-#[cfg(not(feature = "pyo3"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
+#[cfg_attr(feature = "pyo3", pyclass)]
 pub struct FmtChunk {
     /// Format of the audio data. 1 for PCM, 3 for IEEE float.
     pub format: FormatCode,
@@ -37,33 +37,6 @@ pub struct FmtChunk {
     pub block_align: u16,
     /// Bits per sample of the audio data.
     pub bits_per_sample: u16,
-    pub ext_fmt_chunk: ExtFmtChunkInfo,
-}
-
-#[cfg(feature = "pyo3")]
-#[pyclass]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(C)]
-pub struct FmtChunk {
-    /// Format of the audio data. 1 for PCM, 3 for IEEE float.
-    #[pyo3(get)]
-    pub format: FormatCode,
-    /// Number of channels in the audio data.
-    #[pyo3(get)]
-    pub channels: u16,
-    /// Sample rate of the audio data.
-    #[pyo3(get)]
-    pub sample_rate: i32,
-    /// Byte rate of the audio data.
-    #[pyo3(get)]
-    pub byte_rate: i32,
-    /// Block align of the audio data.
-    #[pyo3(get)]
-    pub block_align: u16,
-    /// Bits per sample of the audio data.
-    #[pyo3(get)]
-    pub bits_per_sample: u16,
-    #[pyo3(get)]
     pub ext_fmt_chunk: ExtFmtChunkInfo,
 }
 
@@ -351,18 +324,9 @@ impl Display for FmtChunk {
 }
 
 /// An enum used to represent the two possible sizes of the extensible format chunk.
-#[cfg(not(feature = "pyo3"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
-pub enum CbSize {
-    Base = 0,
-    Extended = 22,
-}
-
-#[cfg(feature = "pyo3")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u16)]
-#[pyclass]
+#[cfg_attr(feature = "pyo3", pyclass)]
 pub enum CbSize {
     Base = 0,
     Extended = 22,
@@ -385,31 +349,14 @@ impl Display for CbSize {
 
 /// The extended format chunk of a wav file. This chunk contains additional information about the format of the audio data.
 /// This chunk is present when the format code is set to WAVE_FORMAT_EXTENSIBLE.
-#[cfg(not(feature = "pyo3"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
+#[cfg_attr(feature = "pyo3", pyclass)]
 pub struct ExtFmtChunkInfo {
     cb_size: CbSize,
     valid_bits_per_sample: u16,
     channel_mask: u32,
     sub_format: FormatCode,
-    guid: [u8; 14],
-}
-
-#[cfg(feature = "pyo3")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(C)]
-#[pyclass]
-pub struct ExtFmtChunkInfo {
-    #[pyo3(get)]
-    cb_size: CbSize,
-    #[pyo3(get)]
-    valid_bits_per_sample: u16,
-    #[pyo3(get)]
-    channel_mask: u32,
-    #[pyo3(get)]
-    sub_format: FormatCode,
-    #[pyo3(get)]
     guid: [u8; 14],
 }
 

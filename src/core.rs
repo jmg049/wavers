@@ -429,18 +429,8 @@ pub fn wav_spec<P: AsRef<Path>>(p: P) -> WaversResult<(u32, WavHeader)> {
 }
 
 /// Struct representing the information of a wav file.
-#[cfg(not(feature = "pyo3"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WavInfo {
-    pub wav_type: WavType, // the type of the wav file
-    pub wav_header: WavHeader,
-}
-
-/// Struct representing the information of a wav file.
-/// This struct is used when the pyo3 feature is enabled.
-#[cfg(feature = "pyo3")]
-#[pyclass]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "pyo3", pyclass)]
 pub struct WavInfo {
     pub wav_type: WavType, // the type of the wav file
     pub wav_header: WavHeader,

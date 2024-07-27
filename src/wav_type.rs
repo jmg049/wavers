@@ -17,19 +17,7 @@ const FLOAT_64_BITS: u16 = (std::mem::size_of::<f64>() * 8) as u16;
 /// An enum representing some of the format codes in the wav file format.
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg(not(feature = "pyo3"))]
-pub enum FormatCode {
-    WAV_FORMAT_PCM = 0x0001,
-    WAV_FORMAT_IEEE_FLOAT = 0x0003,
-    WAVE_FORMAT_ALAW = 0x0006,
-    WAVE_FORMAT_MULAW = 0x0007,
-    WAVE_FORMAT_EXTENSIBLE = 0xFFFE,
-}
-
-#[allow(non_camel_case_types)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg(feature = "pyo3")]
-#[pyclass]
+#[cfg_attr(feature = "pyo3", pyclass)]
 pub enum FormatCode {
     WAV_FORMAT_PCM = 0x0001,
     WAV_FORMAT_IEEE_FLOAT = 0x0003,
@@ -83,26 +71,8 @@ impl TryFrom<u16> for FormatCode {
 }
 
 /// Enum representing the encoding of a wav file.
-#[cfg(not(feature = "pyo3"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WavType {
-    Pcm16,
-    Pcm24,
-    Pcm32,
-    Float32,
-    Float64,
-    EPcm16,
-    EPcm24,
-    EPcm32,
-    EFloat32,
-    EFloat64,
-}
-
-/// Enum representing the encoding of a wav file.
-/// This enum is used when the pyo3 feature is enabled.
-#[cfg(feature = "pyo3")]
-#[pyclass]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "pyo3", pyclass)]
 pub enum WavType {
     Pcm16,
     Pcm24,

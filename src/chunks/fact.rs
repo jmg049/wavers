@@ -13,17 +13,9 @@ use crate::{
 };
 
 /// The fact chunk of a wav file. Contains a single field, ``num_samples``. This field is the number of samples in the wav file per channel.
-#[cfg(not(feature = "pyo3"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
-pub struct FactChunk {
-    pub num_samples: u32,
-}
-
-#[cfg(feature = "pyo3")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(C)]
-#[pyclass]
+#[cfg_attr(feature = "pyo3", pyclass)]
 pub struct FactChunk {
     pub num_samples: u32,
 }

@@ -13,6 +13,7 @@ pub trait AudioSample:
     + Num
     + ConvertTo<i16>
     + ConvertTo<i32>
+    + ConvertTo<i24>
     + ConvertTo<f32>
     + ConvertTo<f64>
     + Sync

@@ -82,16 +82,269 @@
 //!
 //!     * Stereo ``.wav`` file:
 //!
+<<<<<<< Updated upstream
+=======
+//! ```no_run
+//! use wavers::{Wav, read};
+//! use std::path::Path;
+//!
+//! fn main() {
+//! 	let fp = "path/to/wav.wav";
+//!     // creates a Wav file struct, does not read the audio data. Just the header information.
+//!     let wav: Wav<i16> = Wav::from_path(fp).unwrap();
+//!     // or to read the audio data directly
+//!     let (samples, sample_rate): (Samples<i16>, i32) = read::<i16, _>(fp).unwrap();
+//!     // samples can be derefed to a slice of samples
+//!     let samples: &[i16] = &samples;
+//! }
+//! ```
+//!
+//! ## Conversion
+//! ```no_run
+//! use wavers::{Wav, read, ConvertTo};
+//! use std::path::Path;
+//!
+//! fn main() {
+//!     // Two ways of converted a wav file
+//!     let fp: "./path/to/i16_encoded_wav.wav";
+//!     let wav: Wav<f32> = Wav::from_path(fp).unwrap();
+//!     // conversion happens automatically when you read
+//!     let samples: &[f32] = &wav.read().unwrap();
+//!
+//!     // or read and then call the convert function on the samples.
+//!     let (samples, sample_rate): (Samples<i16>, i32) = read::<i16, _>(fp).unwrap();
+//!     let samples: &[f32] = &samples.convert();
+//! }
+//! ```
+//!
+//! ## Writing
+//! ```no_run
+//! use wavers::Wav;
+//! use std::path::Path;
+//!
+//! fn main() {
+//! 	let fp: &Path = &Path::new("path/to/wav.wav");
+//! 	let out_fp: &Path = &Path::new("out/path/to/wav.wav");
+//!
+//!     // two main ways, read and write as the type when reading
+//!     let wav: Wav<i16> = Wav::from_path(fp).unwrap();
+//!     wav.write(out_fp).unwrap();
+//!
+//!     // or read, convert, and write
+//!     let (samples, sample_rate): (Samples<i16>,i32) = read::<i16, _>(fp).unwrap();
+//!     let sample_rate = wav.sample_rate();
+//!     let n_channels = wav.n_channels();
+//!
+//!     let samples: &[f32] = &samples.convert();
+//!     write(out_fp, samples, sample_rate, n_channels).unwrap();
+//! }
+//! ```
+//! ## Iteration
+//! ``WaveRs`` provides two primary methods of iteration: Frame-wise and Channel-wise. These can be performed using the ``Wav::frames`` and ``Wav::channels`` functions respectively. Both methods return an iterator over the samples in the wav file. The ``frames`` method returns an iterator over the frames of the wav file, where a frame is a single sample from each channel. The ``channels`` method returns an iterator over the channels of the wav file, where a channel is all the samples for a single channel.
+//!
+//! ```no_run
+//! use wavers::Wav;
+//!
+//! fn main() {
+//!     let wav = Wav::from_path("path/to/two_channel.wav").unwrap();
+//!     for frame in wav.frames() {
+//!        assert_eq!(frame.len(), 2, "The frame should have two samples since the wav file has two channels");
+//!        // do something with the frame
+//!     }
+//!
+//!     for channel in wav.channels() {
+//!         // do something with the channel
+//!         assert_eq!(channel.len(), wav.n_samples() / wav.n_channels(), "The channel should have the same number of samples as the wav file divided by the number of channels");
+//!     }
+//! }
+//! ````
+//!
+//!
+//! ## Wav Utilities
+//! ```no_run
+//! use wavers::wav_spec;
+//! fn main() {
+//!	    let fp = "path/to/wav.wav";
+//!     let wav: Wav<i16> = Wav::from_path(fp).unwrap();
+//!     let wav_spec = wav.wav_spec(); // returns the duration and the header
+//!     println!("{:?}", wav_spec);
+//! }
+//! ```
+//! Check out [wav_inspect](https://crates.io/crates/wav_inspect) for a simnple command line tool to inspect the headers of wav files.
+//! ## Features
+//! The following section describes the features available in the WaveRs crate.
+//! ### Ndarray
+//!
+//! The ``ndarray`` feature is used to provide functions that allow wav files to be read as ``ndarray`` 2-D arrays (samples x channels). There are two functions provided, ``into_ndarray`` and ``as_ndarray``. ``into_ndarray`` consumes the samples and ``as_ndarray`` creates a ``Array2`` from the samples.
+//!
+//! ```no_run
+//! use wavers::{read, Wav, AsNdarray, IntoNdarray, Samples};
+//! use ndarray::{Array2, CowArray2};
+//!
+//! fn main() {
+//! 	let fp = "path/to/wav.wav";
+//!     let wav: Wav<i16> = Wav::from_path(fp).unwrap();
+//!
+//!     // does not consume the wav file struct
+//! 	let (i16_array, sample_rate): (Array2<i16>, i32) = wav.as_ndarray().unwrap();
+//!     
+//!     // consumes the wav file struct
+//! 	let (i16_array, sample_rate): (Array2<i16>, i32) = wav.into_ndarray().unwrap();
+//!
+//!     // convert the array to samples.
+//!     let samples: Samples<i16> = Samples::from(i16_array);
+//! }
+//! ```
+//!
+//! ## Benchmarks
+//! To check out the benchmarks head on over to the benchmarks wiki page on the WaveRs <a href=https://github.com/jmg049/wavers/wiki/Benchmarks>GitHub</a>.
+//! Benchmarks were conducted on the reading and writing functionality of WaveRs and compared to the ``hound`` crate.
+//!
+mod chunks;
+mod conversion;
+mod core;
+mod error;
+mod header;
+mod iter;
+mod wav_type;
+mod mma_reader;
+>>>>>>> Stashed changes
 
 pub mod sample;
 pub mod wave;
 // pub mod iter;
 // pub mod iter;
 
+<<<<<<< Updated upstream
 pub use sample::{AudioConversion, IterAudioConversion, Sample};
 pub use wave::{
     read, signal_channels, signal_duration, signal_info, signal_sample_rate, write, SignalInfo,
     WavFile,
+=======
+#[cfg(feature = "pyo3")]
+use pyo3::prelude::*;
+
+pub use crate::conversion::{AudioSample, ConvertSlice, ConvertTo};
+
+pub use crate::chunks::{FactChunk, FmtChunk, ListChunk, DATA, FACT, LIST, RIFF, WAVE};
+pub use crate::core::{wav_spec, ReadSeek, Samples, Wav};
+pub use crate::error::{WaversError, WaversResult};
+pub use crate::header::WavHeader;
+pub use crate::wav_type::{format_info_to_wav_type, wav_type_to_format_info, FormatCode, WavType};
+pub use crate::mma_reader::MMapReader;
+/// Reads a wav file and returns the samples and the sample rate.
+///
+/// Throws an error if the file cannot be opened.
+///
+/// # Examples
+///
+/// ```no_run
+/// use wavers::{read, Wav, Samples};
+///
+/// fn main() {
+///     let fp = "path/to/wav.wav";
+///     // reads the audio data as i16 samples
+///     let (samples, sample_rate): (Samples<i16>, i32) = read::<i16, _>(fp).unwrap();
+///     // or read the same file as f32 samples
+///     let (samples, sample_rate): (Samples<f32>, i32) = read::<f32, _>(fp).unwrap();
+/// }
+///
+#[inline(always)]
+pub fn read<T: AudioSample, P: AsRef<Path>>(path: P) -> WaversResult<(Samples<T>, i32)>
+where
+    i16: ConvertTo<T>,
+    i24: ConvertTo<T>,
+    i32: ConvertTo<T>,
+    f32: ConvertTo<T>,
+    f64: ConvertTo<T>,
+    Box<[i16]>: ConvertSlice<T>,
+    Box<[i24]>: ConvertSlice<T>,
+    Box<[i32]>: ConvertSlice<T>,
+    Box<[f32]>: ConvertSlice<T>,
+    Box<[f64]>: ConvertSlice<T>,
+{
+    let mut wav: Wav<T> = Wav::from_path(path)?;
+    let samples = wav.read()?;
+    Ok((samples, wav.sample_rate()))
+}
+
+/// Writes wav samples to disk.
+///
+/// # Examples
+///
+/// The code below will generate a wav file from a 10 second, 1-channel sine wave and write it to disk.
+/// ```
+/// use wavers::{read,write, Samples, AudioSample, ConvertTo, ConvertSlice};
+///
+/// fn main() {
+///     let fp = "./wav.wav";
+///     let sr: i32 = 16000;
+///     let duration = 10;
+///     let mut samples: Vec<f32> = (0..sr * duration).map(|x| (x as f32 / sr as f32)).collect();
+///     for sample in samples.iter_mut() {
+///         *sample *= 440.0 * 2.0 * std::f32::consts::PI;
+///         *sample = sample.sin();
+///         *sample *= i16::MAX as f32;
+///     }
+///     let samples: Samples<f32> = Samples::from(samples.into_boxed_slice()).convert();
+///     assert!(write(fp, &samples, sr, 1).is_ok());
+///     std::fs::remove_file(fp).unwrap();
+/// }
+///
+#[inline(always)]
+pub fn write<T: AudioSample, P: AsRef<Path>>(
+    fp: P,
+    samples: &[T],
+    sample_rate: i32,
+    n_channels: u16,
+) -> WaversResult<()>
+where
+    i16: ConvertTo<T>,
+    i24: ConvertTo<T>,
+    i32: ConvertTo<T>,
+    f32: ConvertTo<T>,
+    f64: ConvertTo<T>,
+    Box<[i16]>: ConvertSlice<T>,
+    Box<[i24]>: ConvertSlice<T>,
+    Box<[i32]>: ConvertSlice<T>,
+    Box<[f32]>: ConvertSlice<T>,
+    Box<[f64]>: ConvertSlice<T>,
+{
+    let s = Samples::from(samples);
+    let samples_bytes = s.as_bytes();
+
+    let new_header = WavHeader::new_header::<T>(sample_rate, n_channels, s.len())?;
+    let mut f = fs::File::create(fp)?;
+
+    match new_header.fmt_chunk.format {
+        FormatCode::WAV_FORMAT_PCM => {
+            let header_bytes = new_header.as_base_bytes();
+            f.write_all(&header_bytes)?;
+        }
+        FormatCode::WAV_FORMAT_IEEE_FLOAT | FormatCode::WAVE_FORMAT_EXTENSIBLE => {
+            let header_bytes = new_header.as_extended_bytes();
+            f.write_all(&header_bytes)?;
+        }
+        _ => {
+            return Err(WaversError::InvalidType(
+                new_header.fmt_chunk.format,
+                new_header.fmt_chunk.bits_per_sample,
+                new_header.fmt_chunk.ext_fmt_chunk.sub_format(),
+            ))
+        }
+    }
+
+    f.write_all(&DATA)?;
+    let data_size_bytes = samples_bytes.len() as u32; // write up to the data size
+    f.write_all(&data_size_bytes.to_ne_bytes())?; // write the data size
+    f.write_all(&samples_bytes)?; // write the data
+    Ok(())
+}
+
+use std::{
+    ops::{Neg, Not},
+    str::FromStr,
+>>>>>>> Stashed changes
 };
 
 #[cfg(test)]

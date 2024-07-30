@@ -63,6 +63,18 @@ impl Into<(usize, u32)> for &HeaderChunkInfo {
     }
 }
 
+impl PartialOrd for HeaderChunkInfo {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.offset.cmp(&other.offset))
+    }
+}
+
+impl Ord for HeaderChunkInfo {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.offset.cmp(&other.offset)
+    }
+}
+
 #[cfg(feature = "pyo3")]
 #[pyclass]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -298,7 +310,12 @@ impl Display for WavHeader {
                 .to_string()
                 .as_str(),
         );
-        for (chunk_id, chunk_info) in &self.header_info {
+        let mut sorted_info: Vec<(&ChunkIdentifier, &HeaderChunkInfo)> =
+            self.header_info.iter().collect();
+
+        sorted_info.sort_by(|a, b| a.1.cmp(b.1));
+
+        for (chunk_id, chunk_info) in sorted_info {
             let k = format!("{:?}", chunk_id).green().bold();
             let v = format!("{:?}", chunk_info).white();
             header_info_string.push_str(&format!("\t{}: {}\n", k, v));
@@ -318,7 +335,13 @@ impl Display for WavHeader {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut header_info_string = String::new();
         header_info_string.push_str("Header Info:\n");
-        for (chunk_id, chunk_info) in &self.header_info {
+
+        let mut sorted_info: Vec<(&ChunkIdentifier, &HeaderChunkInfo)> =
+            self.header_info.iter().collect();
+
+        sorted_info.sort_by(|a, b| a.1.cmp(b.1));
+
+        for (chunk_id, chunk_info) in sorted_info {
             let k = format!("{:?}", chunk_id);
             let v = format!("{:?}", chunk_info);
             header_info_string.push_str(&format!("\t{}: {}\n", k, v));

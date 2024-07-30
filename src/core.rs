@@ -13,6 +13,12 @@ use bytemuck::cast_slice;
 #[cfg(feature = "ndarray")]
 use ndarray::{Array, Array2};
 
+#[cfg(feature = "colored")]
+use colored::*;
+
+#[cfg(feature = "pyo3")]
+use pyo3::prelude::*;
+
 use crate::chunks::{read_chunk, Chunk, ListChunk};
 use crate::chunks::{DATA, FACT, LIST};
 use crate::conversion::ConvertSlice;
@@ -23,9 +29,6 @@ use crate::header::{read_header, ChunkIdentifier, HeaderChunkInfo, WavHeader};
 use crate::iter::{ChannelIterator, FrameIterator};
 use crate::wav_type::WavType;
 use crate::{i24, FactChunk, FmtChunk, FormatCode};
-
-#[cfg(feature = "pyo3")]
-use pyo3::prelude::*;
 
 /// Trait representing a type that can be used to read and seek.
 pub trait ReadSeek: Read + Seek {}
@@ -434,6 +437,90 @@ pub fn wav_spec<P: AsRef<Path>>(p: P) -> WaversResult<(u32, WavHeader)> {
 pub struct WavInfo {
     pub wav_type: WavType, // the type of the wav file
     pub wav_header: WavHeader,
+}
+
+impl<T: AudioSample> Debug for Wav<T>
+where
+    i16: ConvertTo<T>,
+    i24: ConvertTo<T>,
+    i32: ConvertTo<T>,
+    f32: ConvertTo<T>,
+    f64: ConvertTo<T>,
+    Box<[i16]>: ConvertSlice<T>,
+    Box<[i24]>: ConvertSlice<T>,
+    Box<[i32]>: ConvertSlice<T>,
+    Box<[f32]>: ConvertSlice<T>,
+    Box<[f64]>: ConvertSlice<T>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let type_str = std::any::type_name::<T>();
+        let header = self.header();
+        let duration = self.duration();
+        let file_size_mb = header.file_size() as f32 / 1_000_000f32;
+        let file_size_mb = format!("{:.2}Mb", file_size_mb);
+
+        f.debug_struct("Wav")
+            .field("Type", &type_str)
+            .field("Header", header)
+            .field("Duration", &duration)
+            .field("File Size (Mb)", &file_size_mb)
+            .finish()
+    }
+}
+
+impl<T: AudioSample> Display for Wav<T>
+where
+    i16: ConvertTo<T>,
+    i24: ConvertTo<T>,
+    i32: ConvertTo<T>,
+    f32: ConvertTo<T>,
+    f64: ConvertTo<T>,
+    Box<[i16]>: ConvertSlice<T>,
+    Box<[i24]>: ConvertSlice<T>,
+    Box<[i32]>: ConvertSlice<T>,
+    Box<[f32]>: ConvertSlice<T>,
+    Box<[f64]>: ConvertSlice<T>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let type_str = std::any::type_name::<T>();
+        let header = self.header();
+        let duration = self.duration();
+        let file_size_mb = header.file_size() as f32 / 1_000_000f32;
+        let file_size_mb = format!("{:.2}Mb", file_size_mb);
+
+        #[cfg(feature = "colored")]
+        {
+            let mut out_str = String::new();
+            out_str.push_str(
+                "Wav file with type:"
+                    .bold()
+                    .white()
+                    .underline()
+                    .to_string()
+                    .as_str(),
+            );
+            out_str.push_str(" ");
+            out_str.push_str(type_str);
+            out_str.push_str("\n");
+            out_str.push_str("Header: ".bold().white().underline().to_string().as_str());
+            out_str.push_str(header.to_string().as_str());
+            out_str.push_str("\n");
+            out_str.push_str("Duration:".bold().white().underline().to_string().as_str());
+            out_str.push_str(" ");
+            out_str.push_str(duration.to_string().as_str());
+            out_str.push_str(" seconds\n");
+            out_str.push_str("File Size:".white().bold().underline().to_string().as_str());
+            out_str.push_str(" ");
+            out_str.push_str(file_size_mb.as_str());
+            write!(f, "{}", out_str)
+        }
+        #[cfg(not(feature = "colored"))]
+        write!(
+            f,
+            "Wav file with type: {}\nHeader: {}\nDuration: {} seconds\nFile Size: {} Mb",
+            type_str, header, duration, file_size_mb
+        )
+    }
 }
 
 #[cfg(feature = "ndarray")]
@@ -1103,6 +1190,16 @@ mod core_tests {
                 assert_approx_eq!(*expected as f64, *actual as f64, 1e-4);
             }
         }
+    }
+
+    #[test]
+    fn test_debug_and_display() {
+        let wav: Wav<i16> = Wav::from_path(ONE_CHANNEL_WAV_I16).unwrap();
+        let debug_str = format!("{:?}", wav);
+        let display_str = format!("{}", wav);
+
+        println!("{}", debug_str);
+        println!("{}", display_str);
     }
 
     fn read_lines<P>(filename: P) -> std::io::Result<std::io::Lines<std::io::BufReader<File>>>

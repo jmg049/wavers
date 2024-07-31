@@ -1,10 +1,11 @@
+/// Module containing the functionality for converting between the supported audio sample types
 use std::fmt::Debug;
 
-/// Module containing the functionality for converting between the supported audio sample types
 use bytemuck::Pod;
+use i24::i24;
 use num_traits::Num;
 
-use crate::{core::alloc_sample_buffer, i24};
+use crate::core::alloc_sample_buffer;
 
 /// Trait used to indicate that a type is an audio sample and can be treated as such.
 pub trait AudioSample:

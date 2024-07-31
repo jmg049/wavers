@@ -26,6 +26,7 @@ pyo3 = { version = "0.21.2", features = ["extension-module"], optional = true }
 numpy = { version = "0.21.0", optional = true }
 colored = { version = "2.1.0", optional = true }
 rubato = "0.15.0"
+i24 = {version="1.0.1", default-features = false}
 
 
 [dev-dependencies]
@@ -52,6 +53,7 @@ harness = false
 
 ## add features
 [features]
+default = []
 ndarray = ["dep:ndarray"]
-pyo3 = ["dep:pyo3", "dep:numpy"]
+pyo3 = ["dep:pyo3", "dep:numpy", "i24/pyo3"]
 colored = ["dep:colored"]

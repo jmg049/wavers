@@ -9,6 +9,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use bytemuck::cast_slice;
+use i24::i24;
 
 #[cfg(feature = "ndarray")]
 use ndarray::{Array, Array2};
@@ -28,7 +29,7 @@ use crate::error::{WaversError, WaversResult};
 use crate::header::{read_header, ChunkIdentifier, HeaderChunkInfo, WavHeader};
 use crate::iter::{BlockIterator, ChannelIterator, FrameIterator};
 use crate::wav_type::WavType;
-use crate::{i24, FactChunk, FmtChunk, FormatCode};
+use crate::{FactChunk, FmtChunk, FormatCode};
 
 /// Trait representing a type that can be used to read and seek.
 pub trait ReadSeek: Read + Seek {}

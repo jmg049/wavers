@@ -21,6 +21,7 @@ use crate::{
     conversion::AudioSample,
     core::{ReadSeek, WavInfo},
     error::{FormatError, WaversError, WaversResult},
+    log,
     wav_type::{format_info_to_wav_type, FormatCode, WavType},
     FactChunk,
 };
@@ -105,6 +106,11 @@ impl WavHeader {
             header_info.contains_key(&DATA.into()),
             "Header info must contain a DATA chunk"
         );
+        log!(
+            log::Level::Debug,
+            "Creating new WavHeader with fmt chunk: {:?}",
+            fmt_chunk
+        );
         WavHeader {
             header_info,
             fmt_chunk,
@@ -128,6 +134,13 @@ impl WavHeader {
     where
         T: AudioSample,
     {
+        log!(
+            log::Level::Debug,
+            "Creating new header with sample rate: {}, channels: {}, samples: {}",
+            sample_rate,
+            n_channels,
+            n_samples
+        );
         let wav_type: WavType = TypeId::of::<T>().try_into()?;
 
         let (main_format, sub_format) = match wav_type {
@@ -225,6 +238,14 @@ impl WavHeader {
             .map(|(_, v)| v.size + 8)
             .sum::<u32>() as usize
             + 8; // Go through each chunk found and sum the size field, +8 for each chunk identifier and size field
+
+        log!(
+            log::Level::Debug,
+            "Created new header with fmt chunk: {:?}\nheader info: {:?}\nfile size: {}",
+            fmt_chunk,
+            header_info,
+            current_file_size
+        );
         Ok(WavHeader {
             header_info,
             fmt_chunk,

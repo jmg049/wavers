@@ -1,7 +1,10 @@
+//! List Chunk - a chunk that contains a list of other chunks. Each chunk in the list is identified by a 4 byte ID, followed by a 4 byte size, and then the data.
 use std::{
     collections::HashMap,
     fmt::{Display, Formatter},
 };
+
+use crate::log;
 
 #[cfg(feature = "colored")]
 use colored::Colorize;
@@ -18,16 +21,8 @@ use crate::{
 pub type InfoId = [u8; 4];
 
 /// A List Chunk - a chunk that contains a list of other chunks. Each chunk in the list is identified by a 4 byte ID, followed by a 4 byte size, and then the data.
-#[cfg(not(feature = "pyo3"))]
+#[cfg_attr(feature = "pyo3", pyclass)]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ListChunk {
-    list_type_id: [u8; 4],
-    data: HashMap<InfoId, String>,
-}
-
-#[cfg(feature = "pyo3")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[pyclass]
 pub struct ListChunk {
     list_type_id: [u8; 4],
     data: HashMap<InfoId, String>,
@@ -88,9 +83,8 @@ impl Chunk for ListChunk {
         println!("{:?}", std::str::from_utf8(&chunk_id).unwrap_or("ERROR"));
 
         reader.read_exact(&mut buf)?; // Read the chunk size
-        let chunk_size = u32::from_ne_bytes(buf);
-
-        println!("Chunk Size={}", chunk_size);
+        let _chunk_size = u32::from_ne_bytes(buf);
+        log!(log::Level::Debug, "Chunk Size: {}", _chunk_size);
 
         reader.read_exact(&mut buf)?; // Read the list type id
         let list_type_id = buf;
@@ -109,7 +103,7 @@ impl Chunk for ListChunk {
             let value = std::str::from_utf8(&value).unwrap_or("[ERROR]").to_string();
             data.insert(id, value);
         }
-
+        log!(log::Level::Debug, "List Chunk Data: {:?}", data);
         Ok(ListChunk::new(list_type_id, data))
     }
 }

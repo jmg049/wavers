@@ -4,8 +4,9 @@ use std::{fmt::Display, io::SeekFrom};
 use crate::{
     chunks::{Chunk, FACT, FMT},
     error::FormatError,
+    log,
     wav_type::{format_info_to_wav_type, wav_type_to_format_info, FormatCode, WavType},
-    ReadSeek, WaversError, WaversResult,
+    ReadSeek, WaversResult,
 };
 
 #[cfg(feature = "colored")]
@@ -68,6 +69,11 @@ impl FmtChunk {
     /// Function to update a WavHeader to a new encoding, for example i16 to f32. Does this in-place.
     #[inline(always)]
     pub fn update_fmt_chunk(&mut self, new_type: WavType) -> WaversResult<()> {
+        log!(
+            log::Level::Debug,
+            "Updating fmt chunk to new type: {:?}",
+            new_type
+        );
         let current_type =
             format_info_to_wav_type((self.format, self.bits_per_sample, self.format()))?;
 
@@ -85,6 +91,7 @@ impl FmtChunk {
         self.block_align = new_block_align;
         self.byte_rate = new_byte_rate;
         self.bits_per_sample = new_bits_per_sample;
+        log!(log::Level::Debug, "Updated fmt chunk: {:?}", self);
 
         Ok(())
     }

@@ -8,11 +8,13 @@
 //! ## Highlights
 //! * Fast and lightweight
 //! * Simple API, read a wav file with ``read`` and write a wav file with ``write``
-//! * Easy and efficient conversion between different types of audio samples.
-//! * Support for the Extensible format.
+//! * Easy and efficient conversion between different types of audio samples (**should** compile down to simd instructions provided you build with the appropriate SIMD instruction set for your architecture).
+//! * Support for the Extensible format (Happy to try and support anything else that pops up, just ask or open a PR).
 //! * Increasing support for different chunks in the wav file.
-//! * Support for the ``ndarray`` crate.
-//! * Support for iteration over the frames and channels of the wav file.
+//! * Support for iteration over the frames, channels and overlapping blocks of the wav file.
+//! * Support for the ``ndarray`` crate. Enable the ``ndarray`` feature to enable ndarray support.
+//! * Support for the ``pyo3`` crate. Enable the ``pyo3`` feature to enable pyo3 support. This is mostly for [PyWavers](https://github.com/jmg049/Pywavers).
+//! * Supports logging through the ``log`` crate. Enable the ``logging`` feature to enable logging.
 //!
 //! ## Crate Status
 //! * This crate is currently in development. Changes to the core API will either not happen or they will be kept to a minimum. Any planned additions to the API will be built on top of the existing API.
@@ -154,15 +156,11 @@ pub mod header;
 
 pub mod iter;
 pub mod wav_type;
-
 use error::FormatError;
 use i24::i24;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
-
-#[cfg(feature = "pyo3")]
-use pyo3::prelude::*;
 
 pub use crate::conversion::{AudioSample, ConvertSlice, ConvertTo};
 
@@ -171,6 +169,15 @@ pub use crate::core::{wav_spec, ReadSeek, Samples, Wav};
 pub use crate::error::{WaversError, WaversResult};
 pub use crate::header::WavHeader;
 pub use crate::wav_type::{format_info_to_wav_type, wav_type_to_format_info, FormatCode, WavType};
+
+/// A macro for logging messages if the logging feature is enabled.
+#[macro_export]
+macro_rules! log {
+    ($level:expr, $($arg:tt)+) => {
+        #[cfg(feature = "logging")]
+        log::log!($level, $($arg)+);
+    };
+}
 
 /// Reads a wav file and returns the samples and the sample rate.
 ///
@@ -203,8 +210,14 @@ where
     Box<[f32]>: ConvertSlice<T>,
     Box<[f64]>: ConvertSlice<T>,
 {
-    let mut wav: Wav<T> = Wav::from_path(path)?;
+    let mut wav: Wav<T> = Wav::from_path(&path)?;
     let samples = wav.read()?;
+    log!(
+        log::Level::Debug,
+        "Read wav file from {}\n{}",
+        path.as_ref().display(),
+        wav,
+    );
     Ok((samples, wav.sample_rate()))
 }
 
@@ -254,7 +267,8 @@ where
     let samples_bytes = s.as_bytes();
 
     let new_header = WavHeader::new_header::<T>(sample_rate, n_channels, s.len())?;
-    let mut f = fs::File::create(fp)?;
+
+    let mut f = fs::File::create(&fp)?;
 
     match new_header.fmt_chunk.format {
         FormatCode::WAV_FORMAT_PCM => {
@@ -274,6 +288,11 @@ where
     let data_size_bytes = samples_bytes.len() as u32; // write up to the data size
     f.write_all(&data_size_bytes.to_ne_bytes())?; // write the data size
     f.write_all(&samples_bytes)?; // write the data
+    log!(
+        log::Level::Debug,
+        "Wrote wav file to {}",
+        fp.as_ref().display()
+    );
     Ok(())
 }
 

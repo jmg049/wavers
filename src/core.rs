@@ -29,7 +29,7 @@ use crate::error::{FormatError, WaversError, WaversResult};
 use crate::header::{read_header, ChunkIdentifier, HeaderChunkInfo, WavHeader};
 use crate::iter::{BlockIterator, ChannelIterator, FrameIterator};
 use crate::wav_type::WavType;
-use crate::{FactChunk, FmtChunk, FormatCode};
+use crate::{log, FactChunk, FmtChunk, FormatCode};
 
 /// Trait representing a type that can be used to read and seek.
 pub trait ReadSeek: Read + Seek {}
@@ -114,15 +114,33 @@ where
     #[inline(always)]
     pub fn read(&mut self) -> WaversResult<Samples<T>> {
         let (data_offset, data_size_bytes) = self.header().data().into();
+        log!(log::Level::Debug, "Data offset: {}", data_offset);
+        log!(log::Level::Debug, "Data size: {}", data_size_bytes);
         let data_offset = data_offset + 8;
         let native_type = self.wav_info.wav_type;
+        log!(log::Level::Debug, "Native type: {:?}", native_type);
         let native_size_bytes: usize = native_type.n_bytes();
+        log!(
+            log::Level::Debug,
+            "Native size bytes: {}",
+            native_size_bytes
+        );
         let number_of_samples_already_read = (self.reader.seek(SeekFrom::Current(0))?
             - data_offset as u64)
             / native_size_bytes as u64;
+        log!(
+            log::Level::Debug,
+            "Number of samples already read: {}",
+            number_of_samples_already_read
+        );
 
         let n_samples = data_size_bytes as usize / native_size_bytes;
         let samples = self.read_samples(n_samples - number_of_samples_already_read as usize)?;
+        log!(
+            log::Level::Debug,
+            "Number of samples read: {}",
+            samples.len()
+        );
         self.reader.seek(SeekFrom::Start(data_offset as u64))?;
 
         Ok(samples)
@@ -147,7 +165,7 @@ where
         let wav_type_from_file = self.wav_info.wav_type;
 
         let desired_type = WavType::try_from(TypeId::of::<T>())?;
-
+        log!(log::Level::Debug, "Desired type: {:?}", desired_type);
         if wav_type_from_file == desired_type {
             return Ok(Samples::from(cast_slice::<u8, T>(&samples)));
         }
@@ -187,7 +205,11 @@ where
         self.reader.read_exact(&mut samples)?;
 
         let wav_type_from_file = self.wav_info.wav_type;
-
+        log!(
+            log::Level::Debug,
+            "Wav type from file: {:?}",
+            wav_type_from_file
+        );
         match wav_type_from_file {
             // file is encoded as i16 but we want T
             WavType::Pcm16 | WavType::EPcm16 => {
@@ -225,13 +247,20 @@ where
         T: ConvertTo<F>,
         Box<[T]>: ConvertSlice<F>,
     {
+        log!(log::Level::Debug, "Writing to file: {:?}", p.as_ref());
         let samples = self.read()?.convert::<F>();
+        log!(
+            log::Level::Debug,
+            "Converted samples to type: {:?}",
+            std::any::type_name::<F>()
+        );
+
         let sample_bytes = samples.as_bytes();
         let fmt_chunk = self.wav_info.wav_header.fmt_chunk;
         self.wav_info.wav_header =
             WavHeader::new_header::<F>(fmt_chunk.sample_rate, fmt_chunk.channels, samples.len())?;
 
-        let f = std::fs::File::create(p)?;
+        let f = std::fs::File::create(&p)?;
         let mut buf_writer: BufWriter<File> = BufWriter::new(f);
         let data_size_bytes = sample_bytes.len() as u32; // write up to the data size
 
@@ -264,6 +293,11 @@ where
         buf_writer.write_all(&DATA)?;
         buf_writer.write_all(&data_size_bytes.to_ne_bytes())?; // write the data size
         buf_writer.write_all(&sample_bytes)?; // write the data
+        log!(
+            log::Level::Debug,
+            "Finished writing to file: {:?}",
+            p.as_ref()
+        );
         Ok(())
     }
 

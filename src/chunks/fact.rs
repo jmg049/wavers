@@ -1,3 +1,4 @@
+//! Contains the FactChunk struct and its implementation.
 use std::fmt::{Display, Formatter};
 
 #[cfg(feature = "colored")]

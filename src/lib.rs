@@ -155,6 +155,7 @@ pub mod header;
 pub mod iter;
 pub mod wav_type;
 
+use error::FormatError;
 use i24::i24;
 use std::fs;
 use std::io::Write;
@@ -265,11 +266,7 @@ where
             f.write_all(&header_bytes)?;
         }
         _ => {
-            return Err(WaversError::InvalidType(
-                new_header.fmt_chunk.format,
-                new_header.fmt_chunk.bits_per_sample,
-                new_header.fmt_chunk.ext_fmt_chunk.sub_format(),
-            ))
+            return Err(FormatError::InvalidTypeId("Invalid type ID").into());
         }
     }
 

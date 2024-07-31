@@ -1,6 +1,4 @@
-//!
 //! Module containing functions and structs for working with Wav file headers.
-//!
 use std::{
     any::TypeId,
     collections::HashMap,
@@ -22,7 +20,7 @@ use crate::{
     },
     conversion::AudioSample,
     core::{ReadSeek, WavInfo},
-    error::{WaversError, WaversResult},
+    error::{FormatError, WaversError, WaversResult},
     wav_type::{format_info_to_wav_type, FormatCode, WavType},
     FactChunk,
 };
@@ -167,7 +165,7 @@ impl WavHeader {
                     FormatCode::WAV_FORMAT_IEEE_FLOAT,
                 )
             }
-            _ => return Err(WaversError::InvalidWavType(wav_type)),
+            _ => return Err(FormatError::InvalidWavType(wav_type).into()),
         };
 
         let fmt_chunk = FmtChunk::new(
@@ -192,7 +190,7 @@ impl WavHeader {
                 FMT_SIZE_EXTENDED_SIZE
             }
             _ => {
-                return Err(WaversError::InvalidWavType(wav_type));
+                return Err(FormatError::InvalidWavType(wav_type).into());
             }
         };
 
@@ -330,6 +328,7 @@ impl Display for WavHeader {
         )
     }
 }
+
 #[cfg(not(feature = "colored"))]
 impl Display for WavHeader {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

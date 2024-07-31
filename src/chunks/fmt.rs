@@ -1,9 +1,11 @@
+//! The fmt chunk of a wav file. This chunk contains information about the format of the audio data.
 use std::{fmt::Display, io::SeekFrom};
 
 use crate::{
     chunks::{Chunk, FACT, FMT},
+    error::FormatError,
     wav_type::{format_info_to_wav_type, wav_type_to_format_info, FormatCode, WavType},
-    ReadSeek, WaversResult,
+    ReadSeek, WaversError, WaversResult,
 };
 
 #[cfg(feature = "colored")]
@@ -259,7 +261,7 @@ impl Chunk for FmtChunk {
                     reader.read_exact(&mut fmt_buf)?;
                     FmtChunk::from_extended_bytes(fmt_buf)
                 }
-                _ => return Err(crate::WaversError::InvalidFmtChunkSize(total_size_in_bytes)),
+                _ => return Err(FormatError::InvalidFmtChunkSize(total_size_in_bytes).into()),
             },
         };
         Ok(fmt_chunk)

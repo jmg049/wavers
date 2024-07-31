@@ -1,3 +1,4 @@
+//! Module for the WavType enum and related functions.
 use std::{
     any::TypeId,
     fmt::{self, Display, Formatter},
@@ -6,7 +7,7 @@ use std::{
 #[cfg(feature = "pyo3")]
 use pyo3::prelude::*;
 
-use crate::{i24, WaversError, WaversResult};
+use crate::{error::FormatError, i24, WaversError, WaversResult};
 
 const PCM_16_BITS: u16 = (std::mem::size_of::<i16>() * 8) as u16;
 const PCM_24_BITS: u16 = (std::mem::size_of::<i24>() * 8) as u16;
@@ -65,7 +66,7 @@ impl TryFrom<u16> for FormatCode {
             0x0006 => Ok(FormatCode::WAVE_FORMAT_ALAW),
             0x0007 => Ok(FormatCode::WAVE_FORMAT_MULAW),
             0xFFFE => Ok(FormatCode::WAVE_FORMAT_EXTENSIBLE),
-            _ => Err(WaversError::InvalidBitsPerSample(value)),
+            _ => Err(FormatError::InvalidBitsPerSample(value).into()),
         }
     }
 }
@@ -150,7 +151,14 @@ pub const fn format_info_to_wav_type(info: (FormatCode, u16, FormatCode)) -> Wav
         (FormatCode::WAVE_FORMAT_EXTENSIBLE, FLOAT_64_BITS, FormatCode::WAV_FORMAT_IEEE_FLOAT) => {
             WavType::EFloat64
         }
-        _ => return Err(WaversError::InvalidType(info.0, info.1, info.2)),
+        _ => {
+            // Cannot turn this into an into statement since into isn't const
+            return Err(WaversError::Format(FormatError::InvalidType {
+                main: info.0,
+                bits: info.1,
+                sub: info.2,
+            }));
+        }
     })
 }
 
@@ -232,7 +240,9 @@ impl TryFrom<TypeId> for WavType {
             x if x == TypeId::of::<i32>() => Ok(WavType::Pcm32),
             x if x == TypeId::of::<f32>() => Ok(WavType::EFloat32),
             x if x == TypeId::of::<f64>() => Ok(WavType::EFloat64),
-            _ => Err(WaversError::InvalidTypeId(format!("{:?}", value))),
+            _ => {
+                return Err(FormatError::InvalidTypeId(std::any::type_name::<TypeId>()).into());
+            }
         }
     }
 }

@@ -25,7 +25,7 @@ use crate::chunks::{DATA, FACT, LIST};
 use crate::conversion::ConvertSlice;
 
 use crate::conversion::{AudioSample, ConvertTo};
-use crate::error::{WaversError, WaversResult};
+use crate::error::{FormatError, WaversError, WaversResult};
 use crate::header::{read_header, ChunkIdentifier, HeaderChunkInfo, WavHeader};
 use crate::iter::{BlockIterator, ChannelIterator, FrameIterator};
 use crate::wav_type::WavType;
@@ -253,10 +253,11 @@ where
                 buf_writer.write_all(&header_bytes)?;
             }
             _ => {
-                return Err(WaversError::UnsupportedWriteFormat(
-                    self.format().0,
-                    self.format().1,
-                ));
+                return Err(FormatError::UnsupportedWriteFormat {
+                    main: self.format().0,
+                    sub: self.format().1,
+                }
+                .into());
             }
         };
 
@@ -375,11 +376,11 @@ where
         let max_pos = self.max_data_pos();
         let current_pos = self.current_pos()?;
         if current_pos + n_bytes as u64 > max_pos {
-            return Err(WaversError::InvalidSeekOperation(
-                current_pos,
-                max_pos,
-                n_bytes as u64,
-            ));
+            return Err(WaversError::InvalidSeekOperation {
+                current: current_pos,
+                max: max_pos,
+                attempted: n_bytes as u64,
+            });
         }
         Ok(self.reader.seek(SeekFrom::Current(n_bytes))?)
     }

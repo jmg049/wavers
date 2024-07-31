@@ -26,7 +26,7 @@ use crate::conversion::ConvertSlice;
 use crate::conversion::{AudioSample, ConvertTo};
 use crate::error::{WaversError, WaversResult};
 use crate::header::{read_header, ChunkIdentifier, HeaderChunkInfo, WavHeader};
-use crate::iter::{ChannelIterator, FrameIterator};
+use crate::iter::{BlockIterator, ChannelIterator, FrameIterator};
 use crate::wav_type::WavType;
 use crate::{i24, FactChunk, FmtChunk, FormatCode};
 
@@ -398,6 +398,12 @@ where
         Ok(self.reader.seek(SeekFrom::Current(0))?)
     }
 
+    /// Seeks relative the current position in the wav file.
+    // Currently it is pub(crate) since it is only used by the BlockIterator, and also allows arbitrary seeking which is probably not good.
+    pub(crate) fn seek_relative(&mut self, pos: i64) -> WaversResult<u64> {
+        Ok(self.reader.seek(SeekFrom::Current(pos))?)
+    }
+
     /// Moves the position of the reader to the start of the data chunk.
     pub fn to_data(&mut self) -> WaversResult<()> {
         let (data_offset, _) = self.header().data().into();
@@ -421,6 +427,10 @@ where
     /// Returns an iterator over the channels of the wav file. See the ``ChannelIterator`` struct for more information.
     pub fn channels(&mut self) -> ChannelIterator<T> {
         ChannelIterator::new(self)
+    }
+
+    pub fn blocks(&mut self, block_size: usize, overlap: usize) -> BlockIterator<T> {
+        BlockIterator::new(self, block_size, overlap)
     }
 }
 

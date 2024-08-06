@@ -147,14 +147,17 @@
 //! To check out the benchmarks head on over to the benchmarks wiki page on the WaveRs <a href=https://github.com/jmg049/wavers/wiki/Benchmarks>GitHub</a>.
 //! Benchmarks were conducted on the reading and writing functionality of WaveRs and compared to the ``hound`` crate.
 //!
+#![cfg_attr(feature = "simd", feature(portable_simd))]
+
 pub mod chunks;
 pub mod conversion;
 pub mod core;
 
 pub mod error;
 pub mod header;
-
 pub mod iter;
+#[cfg(feature = "resampling")]
+pub mod resample;
 pub mod wav_type;
 use error::FormatError;
 use i24::i24;

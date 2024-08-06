@@ -6,7 +6,13 @@ use rand::Rng;
 
 use i24::i24;
 use std::time::Duration;
-use wavers::{Samples, Wav};
+use wavers::{
+    resample::{deinterleave_in_place, interleave_in_place},
+    Samples, Wav,
+};
+
+#[cfg(feature = "simd")]
+use wavers::resample::deinterleave_simd;
 
 macro_rules! bench_sample_conversions {
     ($c:expr, $($from_type:ty => [$($to_type:ty),+]),+) => {
@@ -410,6 +416,56 @@ fn bench_samples_conversion(c: &mut Criterion) {
     );
 }
 
+#[cfg(feature = "resampling")]
+fn bench_interleaving(c: &mut Criterion) {
+    let mut data = Vec::with_capacity(44100 * 60);
+    for i in 0..((44100 * 60) / 2) {
+        data.push(0);
+    }
+    for i in 0..((44100 * 60) / 2) {
+        data.push(1);
+    }
+
+    let mut group = c.benchmark_group("Interleaving");
+    group.sample_size(100);
+
+    group.bench_function("Interleaving in place - 60s @ 44100", |b| {
+        let bench_data = data.clone();
+        let bench_data: Samples<i32> = Samples::from(bench_data.into_boxed_slice());
+        b.iter(|| {
+            black_box(interleave_in_place(&mut data, 2));
+        });
+    });
+}
+
+#[cfg(feature = "resampling")]
+fn bench_deinterleaving(c: &mut Criterion) {
+    let mut data = Vec::with_capacity(44100 * 60);
+    for i in 0..((44100 * 60) / 2) {
+        data.push(0);
+        data.push(1);
+    }
+    let mut group = c.benchmark_group("Deinterleaving");
+    group.sample_size(100);
+
+    group.bench_function("Deinterleaving in place - 60s @ 44100", |b| {
+        let bench_data = data.clone();
+        let bench_data: Samples<i32> = Samples::from(bench_data.into_boxed_slice());
+        b.iter(|| {
+            black_box(deinterleave_in_place(&mut data, 2));
+        });
+    });
+
+    #[cfg(feature = "simd")]
+    group.bench_function("Deinterleaving SIMD - 60s @ 44100", |b| {
+        let bench_data = data.clone();
+        let bench_data: Samples<i32> = Samples::from(bench_data.into_boxed_slice());
+        b.iter(|| {
+            black_box(deinterleave_simd::<i32, 4>(&mut data, 2));
+        });
+    });
+}
+
 fn noise(duration_sec: Duration, sample_rate: usize, n_channels: usize) -> Samples<f32> {
     let n_samples = duration_sec.as_secs_f32() * sample_rate as f32 * n_channels as f32;
     let n_samples = n_samples.ceil() as usize;
@@ -422,12 +478,27 @@ fn noise(duration_sec: Duration, sample_rate: usize, n_channels: usize) -> Sampl
     Samples::from(data.into_boxed_slice())
 }
 
-criterion_group!(
-    benches,
-    bench_wavers_reading,
-    bench_wavers_writing,
-    bench_samples_conversion,
-    bench_hound_reading,
-    bench_hound_writing
-);
+// Define the benchmark group function
+fn all_benchmarks(c: &mut Criterion) -> Criterion {
+    let mut criterion = Criterion::default();
+    bench_samples_conversion(c);
+    bench_wavers_reading(c);
+    bench_wavers_writing(c);
+    bench_hound_reading(c);
+    bench_hound_writing(c);
+
+    #[cfg(feature = "resampling")]
+    {
+        bench_interleaving(c);
+        bench_deinterleaving(c);
+    }
+
+    criterion
+}
+
+criterion_group! {
+    name = benches;
+    config = Criterion::default();
+    targets = all_benchmarks
+}
 criterion_main!(benches);

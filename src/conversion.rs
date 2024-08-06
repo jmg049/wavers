@@ -32,7 +32,7 @@ impl AudioSample for f64 {}
 /// Trait for converting between audio sample types
 /// The type ``T`` must implement the ``AudioSample`` trait
 pub trait ConvertTo<T: AudioSample> {
-    fn convert_to(&self) -> T
+    fn convert_to(self) -> T
     where
         Self: Sized + AudioSample;
 }
@@ -59,36 +59,36 @@ where
 // i16 //
 impl ConvertTo<i16> for i16 {
     #[inline(always)]
-    fn convert_to(&self) -> i16 {
-        *self
+    fn convert_to(self) -> i16 {
+        self
     }
 }
 
 impl ConvertTo<i24> for i16 {
     #[inline(always)]
-    fn convert_to(&self) -> i24 {
-        i24::from_i32((*self as i32) << 8)
+    fn convert_to(self) -> i24 {
+        i24::from_i32((self as i32) << 8)
     }
 }
 
 impl ConvertTo<i32> for i16 {
     #[inline(always)]
-    fn convert_to(&self) -> i32 {
-        (*self as i32) << 16
+    fn convert_to(self) -> i32 {
+        (self as i32) << 16
     }
 }
 
 impl ConvertTo<f32> for i16 {
     #[inline(always)]
-    fn convert_to(&self) -> f32 {
-        ((*self as f32) / (i16::MAX as f32)).clamp(-1.0, 1.0)
+    fn convert_to(self) -> f32 {
+        ((self as f32) / (i16::MAX as f32)).clamp(-1.0, 1.0)
     }
 }
 
 impl ConvertTo<f64> for i16 {
     #[inline(always)]
-    fn convert_to(&self) -> f64 {
-        ((*self as f64) / (i16::MAX as f64)).clamp(-1.0, 1.0)
+    fn convert_to(self) -> f64 {
+        ((self as f64) / (i16::MAX as f64)).clamp(-1.0, 1.0)
     }
 }
 
@@ -96,35 +96,35 @@ impl ConvertTo<f64> for i16 {
 
 impl ConvertTo<i16> for i24 {
     #[inline(always)]
-    fn convert_to(&self) -> i16 {
+    fn convert_to(self) -> i16 {
         (self.to_i32() >> 8) as i16
     }
 }
 
 impl ConvertTo<i24> for i24 {
     #[inline(always)]
-    fn convert_to(&self) -> i24 {
-        *self
+    fn convert_to(self) -> i24 {
+        self
     }
 }
 
 impl ConvertTo<i32> for i24 {
     #[inline(always)]
-    fn convert_to(&self) -> i32 {
+    fn convert_to(self) -> i32 {
         self.to_i32() << 8
     }
 }
 
 impl ConvertTo<f32> for i24 {
     #[inline(always)]
-    fn convert_to(&self) -> f32 {
+    fn convert_to(self) -> f32 {
         (self.to_i32() as f32) / (i32::MAX as f32)
     }
 }
 
 impl ConvertTo<f64> for i24 {
     #[inline(always)]
-    fn convert_to(&self) -> f64 {
+    fn convert_to(self) -> f64 {
         (self.to_i32() as f64) / (i32::MAX as f64)
     }
 }
@@ -132,112 +132,112 @@ impl ConvertTo<f64> for i24 {
 // i32 //
 impl ConvertTo<i16> for i32 {
     #[inline(always)]
-    fn convert_to(&self) -> i16 {
-        (*self >> 16) as i16
+    fn convert_to(self) -> i16 {
+        (self >> 16) as i16
     }
 }
 
 impl ConvertTo<i24> for i32 {
     #[inline(always)]
-    fn convert_to(&self) -> i24 {
-        i24::from_i32(*self >> 8)
+    fn convert_to(self) -> i24 {
+        i24::from_i32(self >> 8)
     }
 }
 
 impl ConvertTo<i32> for i32 {
     #[inline(always)]
-    fn convert_to(&self) -> i32 {
-        *self
+    fn convert_to(self) -> i32 {
+        self
     }
 }
 
 impl ConvertTo<f32> for i32 {
     #[inline(always)]
-    fn convert_to(&self) -> f32 {
-        ((*self as f32) / (i32::MAX as f32)).clamp(-1.0, 1.0)
+    fn convert_to(self) -> f32 {
+        ((self as f32) / (i32::MAX as f32)).clamp(-1.0, 1.0)
     }
 }
 
 impl ConvertTo<f64> for i32 {
     #[inline(always)]
-    fn convert_to(&self) -> f64 {
-        ((*self as f64) / (i32::MAX as f64)).clamp(-1.0, 1.0)
+    fn convert_to(self) -> f64 {
+        ((self as f64) / (i32::MAX as f64)).clamp(-1.0, 1.0)
     }
 }
 
 // f32 //
 impl ConvertTo<i16> for f32 {
     #[inline(always)]
-    fn convert_to(&self) -> i16 {
-        ((*self * (i16::MAX as f32)).clamp(i16::MIN as f32, i16::MAX as f32)).round() as i16
+    fn convert_to(self) -> i16 {
+        ((self * (i16::MAX as f32)).clamp(i16::MIN as f32, i16::MAX as f32)).round() as i16
     }
 }
 
 impl ConvertTo<i24> for f32 {
     #[inline(always)]
-    fn convert_to(&self) -> i24 {
+    fn convert_to(self) -> i24 {
         i24::from_i32(
-            ((*self * (i32::MAX as f32)).clamp(i32::MIN as f32, i32::MAX as f32)).round() as i32,
+            ((self * (i32::MAX as f32)).clamp(i32::MIN as f32, i32::MAX as f32)).round() as i32,
         )
     }
 }
 
 impl ConvertTo<i32> for f32 {
     #[inline(always)]
-    fn convert_to(&self) -> i32 {
-        ((*self * (i32::MAX as f32)).clamp(i32::MIN as f32, i32::MAX as f32)).round() as i32
+    fn convert_to(self) -> i32 {
+        ((self * (i32::MAX as f32)).clamp(i32::MIN as f32, i32::MAX as f32)).round() as i32
     }
 }
 
 impl ConvertTo<f32> for f32 {
     #[inline(always)]
-    fn convert_to(&self) -> f32 {
-        *self
+    fn convert_to(self) -> f32 {
+        self
     }
 }
 
 impl ConvertTo<f64> for f32 {
     #[inline(always)]
-    fn convert_to(&self) -> f64 {
-        *self as f64
+    fn convert_to(self) -> f64 {
+        self as f64
     }
 }
 
 // f64 //
 impl ConvertTo<i16> for f64 {
     #[inline(always)]
-    fn convert_to(&self) -> i16 {
-        ((*self * (i16::MAX as f64)).clamp(i16::MIN as f64, i16::MAX as f64)).round() as i16
+    fn convert_to(self) -> i16 {
+        ((self * (i16::MAX as f64)).clamp(i16::MIN as f64, i16::MAX as f64)).round() as i16
     }
 }
 
 impl ConvertTo<i24> for f64 {
     #[inline(always)]
-    fn convert_to(&self) -> i24 {
+    fn convert_to(self) -> i24 {
         i24::from_i32(
-            ((*self * (i32::MAX as f64)).clamp(i32::MIN as f64, i32::MAX as f64)).round() as i32,
+            ((self * (i32::MAX as f64)).clamp(i32::MIN as f64, i32::MAX as f64)).round() as i32,
         )
     }
 }
 
 impl ConvertTo<i32> for f64 {
     #[inline(always)]
-    fn convert_to(&self) -> i32 {
-        ((*self * (i32::MAX as f64)).clamp(i32::MIN as f64, i32::MAX as f64)).round() as i32
+    fn convert_to(self) -> i32 {
+        ((self * (i32::MAX as f64)).clamp(i32::MIN as f64, i32::MAX as f64)).round() as i32
     }
 }
 
 impl ConvertTo<f32> for f64 {
     #[inline(always)]
-    fn convert_to(&self) -> f32 {
-        *self as f32
+    fn convert_to(self) -> f32 {
+        self as f32
     }
 }
 
 impl ConvertTo<f64> for f64 {
     #[inline(always)]
-    fn convert_to(&self) -> f64 {
-        *self
+    fn convert_to(self) -> f64 {
+        self
     }
 }
 

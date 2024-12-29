@@ -260,7 +260,7 @@ where
         self.wav_info.wav_header =
             WavHeader::new_header::<F>(fmt_chunk.sample_rate, fmt_chunk.channels, samples.len())?;
 
-        let f = std::fs::File::create(&p)?;
+        let f = File::create(&p)?;
         let mut buf_writer: BufWriter<File> = BufWriter::new(f);
         let data_size_bytes = sample_bytes.len() as u32; // write up to the data size
 
@@ -270,7 +270,7 @@ where
                 buf_writer.write_all(&header_bytes)?;
             }
             (FormatCode::WAV_FORMAT_IEEE_FLOAT, _) => {
-                let header_bytes = self.wav_info.wav_header.as_extended_bytes(); // need to check if the format should always be marked as extended
+                let header_bytes = self.wav_info.wav_header.as_base_bytes(); 
                 buf_writer.write_all(&header_bytes)?;
             }
             (FormatCode::WAVE_FORMAT_EXTENSIBLE, FormatCode::WAV_FORMAT_PCM) => {
@@ -963,6 +963,144 @@ mod core_tests {
         for (expected, actual) in expected_i32_samples.iter().zip(wav_i32.iter()) {
             assert_eq!(*expected, *actual, "{} != {}", expected, actual);
         }
+    }
+
+    /// Tests the size of the wav file. Response to https://github.com/jmg049/wavers/issues/24
+    #[test]
+    fn test_wav_size() {
+        if !Path::new(TEST_OUTPUT).exists() {
+            std::fs::create_dir(TEST_OUTPUT).unwrap();
+        }
+
+        // Test with different sample types and durations
+        let test_cases = [
+            // (duration in seconds, sample_rate)
+            (1, 16000),
+            (5, 44100),
+            (10, 48000),
+        ];
+
+        for (duration, sample_rate) in test_cases {
+            let test_name = format!("riff_size_{}s_{}hz", duration, sample_rate);
+            let out_fp = format!("{}{}.wav", TEST_OUTPUT, test_name);
+
+            // Generate test signal
+            let mut samples: Vec<f32> = (0..sample_rate * duration)
+                .map(|x| (x as f32 / sample_rate as f32))
+                .collect();
+            for sample in samples.iter_mut() {
+                *sample *= 440.0 * 2.0 * std::f32::consts::PI;
+                *sample = sample.sin();
+                *sample *= i16::MAX as f32;
+            }
+
+            // Write test file
+            let samples: Samples<f32> = Samples::from(samples.into_boxed_slice());
+            crate::write(&out_fp, &samples, sample_rate as i32, 1)
+                .expect("Failed to write WAV file");
+
+            // Verify RIFF chunk size
+            let mut file = File::open(&out_fp).expect("Failed to open WAV file");
+            let file_size = file.metadata().expect("Failed to get file metadata").len();
+
+            // Read RIFF chunk size
+            file.seek(SeekFrom::Start(4))
+                .expect("Failed to seek to RIFF size");
+            let mut riff_size_buf = [0u8; 4];
+            file.read_exact(&mut riff_size_buf)
+                .expect("Failed to read RIFF size");
+            let riff_chunk_size = u32::from_le_bytes(riff_size_buf);
+
+            // Read WAVE ID to make sure we're at the right spot
+            file.seek(SeekFrom::Start(8))
+                .expect("Failed to seek to WAVE ID");
+            let mut wave_id = [0u8; 4];
+            file.read_exact(&mut wave_id)
+                .expect("Failed to read WAVE ID");
+            assert_eq!(
+                &wave_id, b"WAVE",
+                "WAVE identifier not found where expected"
+            );
+
+            // Read format info
+            file.seek(SeekFrom::Start(16))
+                .expect("Failed to seek to fmt size");
+            let mut fmt_size_buf = [0u8; 4];
+            file.read_exact(&mut fmt_size_buf)
+                .expect("Failed to read fmt size");
+            let fmt_chunk_size = u32::from_le_bytes(fmt_size_buf);
+            println!("  fmt chunk size: {} bytes", fmt_chunk_size);
+
+            // Calculate data chunk position (after fmt chunk)
+            let data_pos = 20 + fmt_chunk_size as u64;
+
+            // Verify "data" identifier
+            file.seek(SeekFrom::Start(data_pos))
+                .expect("Failed to seek to data chunk");
+            let mut data_id = [0u8; 4];
+            file.read_exact(&mut data_id)
+                .expect("Failed to read data identifier");
+
+            // Read data chunk size
+            let mut data_size_buf = [0u8; 4];
+            file.read_exact(&mut data_size_buf)
+                .expect("Failed to read data size");
+            let data_chunk_size = u32::from_le_bytes(data_size_buf);
+
+            // Calculate expected data size
+            let expected_data_size = (file_size - (data_pos + 8)) as u32;
+
+            assert_eq!(
+                riff_chunk_size,
+                (file_size - 8) as u32,
+                "RIFF chunk size incorrect for {}: expected {}, got {}",
+                test_name,
+                file_size - 8,
+                riff_chunk_size
+            );
+
+            assert_eq!(
+                data_chunk_size,
+                expected_data_size,
+                "Data chunk size incorrect for {}: expected {}, got {}",
+                test_name,
+                expected_data_size,
+                data_chunk_size
+            );
+
+            // Clean up
+            std::fs::remove_file(Path::new(&out_fp)).unwrap();
+        }
+
+        // Test with existing WAV file to verify read/write preserves size
+        let input_wav = "test_resources/one_channel_i16.wav";
+        let output_wav = format!("{}riff_size_readwrite.wav", TEST_OUTPUT);
+
+        let mut wav: Wav<f32> = Wav::from_path(input_wav).unwrap();
+        let samples = wav.read().unwrap();
+        crate::write(&output_wav, &samples, wav.sample_rate(), wav.n_channels())
+            .expect("Failed to write WAV file");
+
+        // Verify RIFF chunk size in written file
+        let mut file = File::open(&output_wav).expect("Failed to open WAV file");
+        let file_size = file.metadata().expect("Failed to get file metadata").len();
+
+        file.seek(SeekFrom::Start(4))
+            .expect("Failed to seek to RIFF size");
+        let mut riff_size_buf = [0u8; 4];
+        file.read_exact(&mut riff_size_buf)
+            .expect("Failed to read RIFF size");
+        let riff_chunk_size = u32::from_le_bytes(riff_size_buf);
+
+        assert_eq!(
+            riff_chunk_size,
+            (file_size - 8) as u32,
+            "RIFF chunk size incorrect after read/write: expected {}, got {}",
+            file_size - 8,
+            riff_chunk_size
+        );
+
+        std::fs::remove_file(Path::new(&output_wav)).unwrap();
     }
 
     #[cfg(feature = "ndarray")]

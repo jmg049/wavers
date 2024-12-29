@@ -238,8 +238,8 @@ impl TryFrom<TypeId> for WavType {
             x if x == TypeId::of::<i16>() => Ok(WavType::Pcm16),
             x if x == TypeId::of::<i24>() => Ok(WavType::Pcm24),
             x if x == TypeId::of::<i32>() => Ok(WavType::Pcm32),
-            x if x == TypeId::of::<f32>() => Ok(WavType::EFloat32),
-            x if x == TypeId::of::<f64>() => Ok(WavType::EFloat64),
+            x if x == TypeId::of::<f32>() => Ok(WavType::Float32), // Stuck with this for now instead of EFloat since a lot of players do no support the extensible format
+            x if x == TypeId::of::<f64>() => Ok(WavType::Float64),
             _ => {
                 return Err(FormatError::InvalidTypeId(std::any::type_name::<TypeId>()).into());
             }

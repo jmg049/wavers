@@ -158,8 +158,8 @@ pub mod iter;
 pub mod wav_type;
 use error::FormatError;
 use i24::i24;
-use std::fs;
-use std::io::Write;
+use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::path::Path;
 
 pub use crate::conversion::{AudioSample, ConvertSlice, ConvertTo};
@@ -268,26 +268,27 @@ where
 
     let new_header = WavHeader::new_header::<T>(sample_rate, n_channels, s.len())?;
 
-    let mut f = fs::File::create(&fp)?;
+    let f = File::create(&fp)?;
+    let mut buf_writer = BufWriter::new(f);
 
     match new_header.fmt_chunk.format {
-        FormatCode::WAV_FORMAT_PCM => {
+        FormatCode::WAV_FORMAT_PCM | FormatCode::WAV_FORMAT_IEEE_FLOAT => {
             let header_bytes = new_header.as_base_bytes();
-            f.write_all(&header_bytes)?;
+            buf_writer.write_all(&header_bytes)?;
         }
-        FormatCode::WAV_FORMAT_IEEE_FLOAT | FormatCode::WAVE_FORMAT_EXTENSIBLE => {
+        FormatCode::WAVE_FORMAT_EXTENSIBLE => {
             let header_bytes = new_header.as_extended_bytes();
-            f.write_all(&header_bytes)?;
+            buf_writer.write_all(&header_bytes)?;
         }
         _ => {
             return Err(FormatError::InvalidTypeId("Invalid type ID").into());
         }
     }
 
-    f.write_all(&DATA)?;
+    buf_writer.write_all(&DATA)?;
     let data_size_bytes = samples_bytes.len() as u32; // write up to the data size
-    f.write_all(&data_size_bytes.to_ne_bytes())?; // write the data size
-    f.write_all(&samples_bytes)?; // write the data
+    buf_writer.write_all(&data_size_bytes.to_ne_bytes())?; // write the data size
+    buf_writer.write_all(&samples_bytes)?; // write the data
     log!(
         log::Level::Debug,
         "Wrote wav file to {}",

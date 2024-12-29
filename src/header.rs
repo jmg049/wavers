@@ -15,18 +15,16 @@ use colored::Colorize;
 use crate::{
     chunks::{
         fmt::{CbSize, ExtFmtChunkInfo, FMT_CB_SIZE, FMT_SIZE_BASE_SIZE, FMT_SIZE_EXTENDED_SIZE},
-        list::InfoId,
-        read_chunk, Chunk, FmtChunk, ListChunk, DATA, FACT, FMT, LIST, RIFF, WAVE,
+        read_chunk, Chunk, FmtChunk, DATA, FMT, RIFF, WAVE,
     },
     conversion::AudioSample,
     core::{ReadSeek, WavInfo},
-    error::{FormatError, WaversError, WaversResult},
+    error::{WaversError, WaversResult},
     log,
     wav_type::{format_info_to_wav_type, FormatCode, WavType},
-    FactChunk,
 };
 
-const RIFF_SIZE: usize = 4; // do not count the size or RIFF id, only the WAVE id. The other chunks will be used for the remaining size
+const _RIFF_SIZE: usize = 4; // do not count the size or RIFF id, only the WAVE id. The other chunks will be used for the remaining size
 const HEADER_FMT_BASE_SIZE: usize = 36;
 const HEADER_FMT_CB_SIZE: usize = 38;
 const HEADER_FMT_EXTENDED_SIZE: usize = 60;
@@ -143,12 +141,48 @@ impl WavHeader {
         );
         let wav_type: WavType = TypeId::of::<T>().try_into()?;
 
+        // Calculate sizes of data chunks
+        let bits_per_sample = wav_type.n_bits();
+        let data_size_bytes = n_samples * (bits_per_sample / 8) as usize;
+        let fmt_data_size = match wav_type {
+            WavType::Pcm16 | WavType::Pcm24 | WavType::Pcm32 | WavType::Float32
+            | WavType::Float64=> FMT_SIZE_BASE_SIZE,
+            WavType::EPcm16
+            | WavType::EPcm24
+            | WavType::EPcm32
+            | WavType::EFloat32
+            | WavType::EFloat64 => FMT_SIZE_EXTENDED_SIZE,
+        };
+
+        let mut header_info: HashMap<ChunkIdentifier, HeaderChunkInfo> = HashMap::new();
+
+        // The RIFF chunk size should be:
+        // sizeof("WAVE") + sizeof(fmt_chunk) + sizeof(data_chunk)
+        // where each chunk includes its header (identifier + size field)
+        let riff_chunk_size = 4 +                     // "WAVE"
+        (8 + fmt_data_size) +  // "fmt " + size + data
+        (8 + data_size_bytes); // "data" + size + data
+
+        header_info.insert(
+            RIFF.into(),
+            HeaderChunkInfo::new(0, (riff_chunk_size - 8) as u32),
+        );
+        header_info.insert(FMT.into(), HeaderChunkInfo::new(12, fmt_data_size as u32));
+        header_info.insert(
+            DATA.into(),
+            HeaderChunkInfo::new(20 + fmt_data_size, data_size_bytes as u32),
+        );
+
+        // Total file size includes everything
+        let current_file_size = 8 + riff_chunk_size - 8; // RIFF + size + (chunk_size - 8)
+
+        // Create fmt chunk
         let (main_format, sub_format) = match wav_type {
             WavType::Pcm16 | WavType::Pcm24 | WavType::Pcm32 => {
                 (FormatCode::WAV_FORMAT_PCM, FormatCode::WAV_FORMAT_PCM)
             }
             WavType::Float32 | WavType::Float64 => (
-                FormatCode::WAVE_FORMAT_EXTENSIBLE,
+                FormatCode::WAV_FORMAT_IEEE_FLOAT,
                 FormatCode::WAV_FORMAT_IEEE_FLOAT,
             ),
             WavType::EPcm16 | WavType::EPcm24 | WavType::EPcm32 => (
@@ -161,25 +195,7 @@ impl WavHeader {
             ),
         };
 
-        let bits_per_sample = wav_type.n_bits();
-
-        let ext_fmt_chunk = match (main_format, sub_format) {
-            (FormatCode::WAV_FORMAT_PCM, FormatCode::WAV_FORMAT_PCM) => {
-                ExtFmtChunkInfo::new(CbSize::Base, bits_per_sample, 0, FormatCode::WAV_FORMAT_PCM)
-            }
-            (FormatCode::WAVE_FORMAT_EXTENSIBLE, FormatCode::WAV_FORMAT_PCM) => {
-                ExtFmtChunkInfo::new(CbSize::Base, bits_per_sample, 0, FormatCode::WAV_FORMAT_PCM)
-            }
-            (FormatCode::WAVE_FORMAT_EXTENSIBLE, FormatCode::WAV_FORMAT_IEEE_FLOAT) => {
-                ExtFmtChunkInfo::new(
-                    CbSize::Base,
-                    bits_per_sample,
-                    0,
-                    FormatCode::WAV_FORMAT_IEEE_FLOAT,
-                )
-            }
-            _ => return Err(FormatError::InvalidWavType(wav_type).into()),
-        };
+        let ext_fmt_chunk = ExtFmtChunkInfo::new(CbSize::Base, bits_per_sample, 0, sub_format);
 
         let fmt_chunk = FmtChunk::new(
             main_format,
@@ -189,63 +205,6 @@ impl WavHeader {
             ext_fmt_chunk,
         );
 
-        let fact_chunk = FactChunk::new((n_samples / n_channels as usize) as u32); // number of samples per channel
-
-        let mut list_chunk_data: HashMap<InfoId, String> = HashMap::new();
-        list_chunk_data.insert(*b"ISFT", "Wavers".to_string()); // Software used to create the file
-        let list_chunk = ListChunk::new(*b"INFO", list_chunk_data);
-
-        let mut header_info: HashMap<ChunkIdentifier, HeaderChunkInfo> = HashMap::new();
-
-        let header_offset = match main_format {
-            FormatCode::WAV_FORMAT_PCM => FMT_SIZE_BASE_SIZE,
-            FormatCode::WAV_FORMAT_IEEE_FLOAT | FormatCode::WAVE_FORMAT_EXTENSIBLE => {
-                FMT_SIZE_EXTENDED_SIZE
-            }
-            _ => {
-                return Err(FormatError::InvalidWavType(wav_type).into());
-            }
-        };
-
-        header_info.insert(RIFF.into(), HeaderChunkInfo::new(0, RIFF_SIZE as u32));
-        // insert fmt
-        header_info.insert(FMT.into(), HeaderChunkInfo::new(12, header_offset as u32));
-
-        header_info.insert(
-            FACT.into(),
-            HeaderChunkInfo::new(12 + header_offset, fact_chunk.size() as u32 + 8),
-        );
-
-        header_info.insert(
-            LIST.into(),
-            HeaderChunkInfo::new(
-                12 + header_offset + fact_chunk.size() as usize + 8,
-                list_chunk.size() as u32 + 8,
-            ),
-        );
-
-        let data_size_bytes = n_samples * (bits_per_sample / 8) as usize;
-
-        // insert data
-        header_info.insert(
-            DATA.into(),
-            HeaderChunkInfo::new(12 + header_offset, data_size_bytes as u32),
-        );
-
-        let current_file_size = header_info
-            .iter()
-            .filter(|(k, _)| !buf_eq(k.as_ref(), &RIFF))
-            .map(|(_, v)| v.size + 8)
-            .sum::<u32>() as usize
-            + 8; // Go through each chunk found and sum the size field, +8 for each chunk identifier and size field
-
-        log!(
-            log::Level::Debug,
-            "Created new header with fmt chunk: {:?}\nheader info: {:?}\nfile size: {}",
-            fmt_chunk,
-            header_info,
-            current_file_size
-        );
         Ok(WavHeader {
             header_info,
             fmt_chunk,

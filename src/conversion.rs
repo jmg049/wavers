@@ -20,6 +20,7 @@ pub trait AudioSample:
     + Sync
     + Send
     + Debug
+    + Default
 {
 }
 
@@ -93,7 +94,6 @@ impl ConvertTo<f64> for i16 {
 }
 
 // i24 //
-
 impl ConvertTo<i16> for i24 {
     #[inline(always)]
     fn convert_to(&self) -> i16 {

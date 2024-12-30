@@ -270,7 +270,7 @@ where
                 buf_writer.write_all(&header_bytes)?;
             }
             (FormatCode::WAV_FORMAT_IEEE_FLOAT, _) => {
-                let header_bytes = self.wav_info.wav_header.as_base_bytes(); 
+                let header_bytes = self.wav_info.wav_header.as_base_bytes();
                 buf_writer.write_all(&header_bytes)?;
             }
             (FormatCode::WAVE_FORMAT_EXTENSIBLE, FormatCode::WAV_FORMAT_PCM) => {
@@ -1060,12 +1060,9 @@ mod core_tests {
             );
 
             assert_eq!(
-                data_chunk_size,
-                expected_data_size,
+                data_chunk_size, expected_data_size,
                 "Data chunk size incorrect for {}: expected {}, got {}",
-                test_name,
-                expected_data_size,
-                data_chunk_size
+                test_name, expected_data_size, data_chunk_size
             );
 
             // Clean up

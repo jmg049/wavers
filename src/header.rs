@@ -121,6 +121,10 @@ impl WavHeader {
         self.header_info.get(&DATA.into()).unwrap() // Safe since a header cannot be created without a DATA chunk
     }
 
+    pub fn data_mut(&mut self) -> &mut HeaderChunkInfo {
+        self.header_info.get_mut(&DATA.into()).unwrap() // Safe since a header cannot be created without a DATA chunk
+    }
+
     /// Returns the information relating to the FMT chunk.
     pub fn fmt(&self) -> &HeaderChunkInfo {
         self.header_info.get(&FMT.into()).unwrap() // Safe since a header cannot be created without a FMT chunk
@@ -145,8 +149,11 @@ impl WavHeader {
         let bits_per_sample = wav_type.n_bits();
         let data_size_bytes = n_samples * (bits_per_sample / 8) as usize;
         let fmt_data_size = match wav_type {
-            WavType::Pcm16 | WavType::Pcm24 | WavType::Pcm32 | WavType::Float32
-            | WavType::Float64=> FMT_SIZE_BASE_SIZE,
+            WavType::Pcm16
+            | WavType::Pcm24
+            | WavType::Pcm32
+            | WavType::Float32
+            | WavType::Float64 => FMT_SIZE_BASE_SIZE,
             WavType::EPcm16
             | WavType::EPcm24
             | WavType::EPcm32

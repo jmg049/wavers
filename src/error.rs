@@ -29,10 +29,24 @@ pub enum WaversError {
         attempted: u64,
     },
 
+    #[error("Planar to interleaved error: {0}")]
+    PlanarToInterleavedError(String),
+
+    #[error("Interleaved to planar error: {0}")]
+    InterleavedToPlanarError(String),
+
     /// NdArray error (when 'ndarray' feature is enabled)
     #[cfg(feature = "ndarray")]
     #[error("NdArray error: {0}")]
     NdArrayError(#[from] ndarray::ShapeError),
+
+    /// Resampling error (when 'resampling' feature is enabled)
+    #[cfg(feature = "resampling")]
+    #[error("Resampling error: {0}")]
+    ResamplingError(#[from] rubato::ResampleError),
+    #[cfg(feature = "resampling")]
+    #[error("Resampling Construction error: {0}")]
+    ResamplingConstructionError(#[from] rubato::ResamplerConstructionError),
 }
 
 /// Errors specific to WAV format

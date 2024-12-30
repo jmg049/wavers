@@ -147,9 +147,21 @@
 //! To check out the benchmarks head on over to the benchmarks wiki page on the WaveRs <a href=https://github.com/jmg049/wavers/wiki/Benchmarks>GitHub</a>.
 //! Benchmarks were conducted on the reading and writing functionality of WaveRs and compared to the ``hound`` crate.
 //!
+#![cfg_attr(
+    feature = "simd",
+    doc = r##"
+## SIMD
+WaveRs uses the `portable_simd` feature to enable SIMD instructions for the resampling.
+"##
+)]
+#![feature(portable_simd)]
+
 pub mod chunks;
 pub mod conversion;
 pub mod core;
+
+#[cfg(feature = "resampling")]
+pub mod resampling;
 
 pub mod error;
 pub mod header;
@@ -297,6 +309,29 @@ where
     Ok(())
 }
 
+#[inline(always)]
+pub fn write_with_header<T: AudioSample, P: AsRef<Path>>(
+    fp: P,
+    samples: &[T],
+    wav_header: &WavHeader,
+) -> WaversResult<()>
+where
+    i16: ConvertTo<T>,
+    i24: ConvertTo<T>,
+    i32: ConvertTo<T>,
+    f32: ConvertTo<T>,
+    f64: ConvertTo<T>,
+    Box<[i16]>: ConvertSlice<T>,
+    Box<[i24]>: ConvertSlice<T>,
+    Box<[i32]>: ConvertSlice<T>,
+    Box<[f32]>: ConvertSlice<T>,
+    Box<[f64]>: ConvertSlice<T>,
+{
+    let sample_rate = wav_header.fmt_chunk.sample_rate;
+    let n_channels = wav_header.fmt_chunk.channels;
+
+    write(fp, samples, sample_rate, n_channels)
+}
 #[cfg(test)]
 mod lib_tests {
     use approx_eq::assert_approx_eq;

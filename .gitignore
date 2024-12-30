@@ -1,3 +1,4 @@
 Cargo.lock
 /target
 /test_resources/quickstart_genspeech/*
+/.vscode

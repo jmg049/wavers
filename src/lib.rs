@@ -1,151 +1,183 @@
+//! # WaveRs
 //!
-//! # Wavers
-//! WaveRs is a fast and lightweight library for reading and writing ``wav`` files.
-//! Currently, it supports reading and writing of ``i16``, ``i24``, ``i32``, ``f32``, and ``f64`` audio samples.
+//! WaveRs is a high-performance library for reading, writing, and manipulating WAV audio files in Rust.
+//! It focuses on simplicity, type safety, performance, and ergonomic APIs while supporting many advanced WAV format features.
 //!
-//! Feedback and bugs welcome!
+//! ## Core Features
 //!
-//! ## Highlights
-//! * Fast and lightweight
-//! * Simple API, read a wav file with ``read`` and write a wav file with ``write``
-//! * Easy and efficient conversion between different types of audio samples (**should** compile down to simd instructions provided you build with the appropriate SIMD instruction set for your architecture).
-//! * Support for the Extensible format (Happy to try and support anything else that pops up, just ask or open a PR).
-//! * Increasing support for different chunks in the wav file.
-//! * Support for iteration over the frames, channels and overlapping blocks of the wav file.
-//! * Support for the ``ndarray`` crate. Enable the ``ndarray`` feature to enable ndarray support.
-//! * Support for the ``pyo3`` crate. Enable the ``pyo3`` feature to enable pyo3 support. This is mostly for [PyWavers](https://github.com/jmg049/Pywavers).
-//! * Supports logging through the ``log`` crate. Enable the ``logging`` feature to enable logging.
+//! - **Type-Safe Audio Handling**: First-class support for common audio formats:
+//!   - Integer PCM: `i16`, `i24`, `i32`
+//!   - Floating point: `f32`, `f64`
+//!   - Zero-cost conversions between formats
 //!
-//! ## Crate Status
-//! * This crate is currently in development. Changes to the core API will either not happen or they will be kept to a minimum. Any planned additions to the API will be built on top of the existing API.
-//! * Documentation is currently in progress, it is mostly complete but will be updated as necessary.
-//! * The API is tested, but there can always be more tests.
-//! * The crate has been benchmarked, but there can always be more benchmarks.
-//! * Some examples of planned features:
-//!     * Investigate the performance of the ``write`` function.
-//!     * Any suggestions or requests are welcome.
+//! - **Flexible Processing**: Multiple ways to interact with audio data:
+//!   - Frame-wise iteration (all channels at one time point)
+//!   - Channel-wise iteration (process channels independently)
+//!   - Block-wise processing with overlap support
+//!   - Direct buffer access when needed
 //!
-//! ## Examples
-//! The following examples show how to read and write a wav file, as well as retrieving information from the header.
+//! - **Format Support**:
+//!   - Standard PCM and IEEE float formats
+//!   - Extensible WAV format support
+//!   - Multi-channel audio
+//!   - Basic metadata through FACT chunks
+//!   - Preliminary LIST-INFO chunk support
 //!
+//! - **Optional Features**:
+//!   - `ndarray`: Matrix operations via ndarray integration
+//!   - `resampling`: High-quality sample rate conversion
+//!   - `simd`: SIMD acceleration for resampling operations
+//!   - `colored`: Enhanced debug output
+//!   - `logging`: Detailed operation logging
 //!
-//! ## Reading
+//! ## Quick Examples
+//!
+//! ### Reading Audio
 //!
 //! ```no_run
 //! use wavers::{Wav, read};
-//! use std::path::Path;
 //!
-//! fn main() {
-//! 	let fp = "path/to/wav.wav";
-//!     // creates a Wav file struct, does not read the audio data. Just the header information.
-//!     let wav: Wav<i16> = Wav::from_path(fp).unwrap();
-//!     // or to read the audio data directly
-//!     let (samples, sample_rate): (Samples<i16>, i32) = read::<i16, _>(fp).unwrap();
-//!     // samples can be derefed to a slice of samples
-//!     let samples: &[i16] = &samples;
-//! }
+//! // Quick read with automatic conversion to f32
+//! let (samples, sample_rate) = read::<f32, _>("input.wav")?;
+//!
+//! // More control over the process
+//! let mut wav = Wav::<f32>::from_path("input.wav")?;
+//! println!("Channels: {}", wav.n_channels());
+//! println!("Sample Rate: {}", wav.sample_rate());
+//! println!("Duration: {}s", wav.duration());
+//!
+//! let samples = wav.read()?;
 //! ```
 //!
-//! ## Conversion
+//! ### Writing Audio
+//!
 //! ```no_run
-//! use wavers::{Wav, read, ConvertTo};
-//! use std::path::Path;
+//! use wavers::write;
 //!
-//! fn main() {
-//!     // Two ways of converted a wav file
-//!     let fp: "./path/to/i16_encoded_wav.wav";
-//!     let wav: Wav<f32> = Wav::from_path(fp).unwrap();
-//!     // conversion happens automatically when you read
-//!     let samples: &[f32] = &wav.read().unwrap();
+//! // Write a simple sine wave
+//! let sample_rate = 44100;
+//! let freq = 440.0; // Hz
+//! let samples: Vec<f32> = (0..sample_rate)
+//!     .map(|i| {
+//!         let t = i as f32 / sample_rate as f32;
+//!         (t * freq * 2.0 * std::f32::consts::PI).sin()
+//!     })
+//!     .collect();
 //!
-//!     // or read and then call the convert function on the samples.
-//!     let (samples, sample_rate): (Samples<i16>, i32) = read::<i16, _>(fp).unwrap();
-//!     let samples: &[f32] = &samples.convert();
-//! }
+//! write("sine.wav", &samples, sample_rate as i32, 1)?;
 //! ```
 //!
-//! ## Writing
-//! ```no_run
-//! use wavers::Wav;
-//! use std::path::Path;
-//!
-//! fn main() {
-//! 	let fp: &Path = &Path::new("path/to/wav.wav");
-//! 	let out_fp: &Path = &Path::new("out/path/to/wav.wav");
-//!
-//!     // two main ways, read and write as the type when reading
-//!     let wav: Wav<i16> = Wav::from_path(fp).unwrap();
-//!     wav.write(out_fp).unwrap();
-//!
-//!     // or read, convert, and write
-//!     let (samples, sample_rate): (Samples<i16>,i32) = read::<i16, _>(fp).unwrap();
-//!     let sample_rate = wav.sample_rate();
-//!     let n_channels = wav.n_channels();
-//!
-//!     let samples: &[f32] = &samples.convert();
-//!     write(out_fp, samples, sample_rate, n_channels).unwrap();
-//! }
-//! ```
-//! ## Iteration
-//! ``WaveRs`` provides two primary methods of iteration: Frame-wise and Channel-wise. These can be performed using the ``Wav::frames`` and ``Wav::channels`` functions respectively. Both methods return an iterator over the samples in the wav file. The ``frames`` method returns an iterator over the frames of the wav file, where a frame is a single sample from each channel. The ``channels`` method returns an iterator over the channels of the wav file, where a channel is all the samples for a single channel.
+//! ### Processing Audio
 //!
 //! ```no_run
 //! use wavers::Wav;
 //!
-//! fn main() {
-//!     let wav = Wav::from_path("path/to/two_channel.wav").unwrap();
-//!     for frame in wav.frames() {
-//!        assert_eq!(frame.len(), 2, "The frame should have two samples since the wav file has two channels");
-//!        // do something with the frame
-//!     }
+//! let mut wav = Wav::<f32>::from_path("stereo.wav")?;
 //!
-//!     for channel in wav.channels() {
-//!         // do something with the channel
-//!         assert_eq!(channel.len(), wav.n_samples() / wav.n_channels(), "The channel should have the same number of samples as the wav file divided by the number of channels");
-//!     }
+//! // Frame-wise processing (all channels together)
+//! for frame in wav.frames() {
+//!     let left = frame[0];
+//!     let right = frame[1];
+//!     // Process stereo frame...
 //! }
-//! ````
 //!
-//!
-//! ## Wav Utilities
-//! ```no_run
-//! use wavers::wav_spec;
-//! fn main() {
-//!	    let fp = "path/to/wav.wav";
-//!     let wav: Wav<i16> = Wav::from_path(fp).unwrap();
-//!     let wav_spec = wav.wav_spec(); // returns the duration and the header
-//!     println!("{:?}", wav_spec);
+//! // Channel-wise processing
+//! for channel in wav.channels() {
+//!     // Process entire channel...
 //! }
-//! ```
-//! Check out [wav_inspect](https://crates.io/crates/wav_inspect) for a simnple command line tool to inspect the headers of wav files.
-//! ## Features
-//! The following section describes the features available in the WaveRs crate.
-//! ### Ndarray
 //!
-//! The ``ndarray`` feature is used to provide functions that allow wav files to be read as ``ndarray`` 2-D arrays (samples x channels). There are two functions provided, ``into_ndarray`` and ``as_ndarray``. ``into_ndarray`` consumes the samples and ``as_ndarray`` creates a ``Array2`` from the samples.
-//!
-//! ```no_run
-//! use wavers::{read, Wav, AsNdarray, IntoNdarray, Samples};
-//! use ndarray::{Array2, CowArray2};
-//!
-//! fn main() {
-//! 	let fp = "path/to/wav.wav";
-//!     let wav: Wav<i16> = Wav::from_path(fp).unwrap();
-//!
-//!     // does not consume the wav file struct
-//! 	let (i16_array, sample_rate): (Array2<i16>, i32) = wav.as_ndarray().unwrap();
-//!     
-//!     // consumes the wav file struct
-//! 	let (i16_array, sample_rate): (Array2<i16>, i32) = wav.into_ndarray().unwrap();
-//!
-//!     // convert the array to samples.
-//!     let samples: Samples<i16> = Samples::from(i16_array);
+//! // Block processing with overlap
+//! for block in wav.blocks(1024, 512) {
+//!     // Process 1024-sample blocks with 512 samples overlap
 //! }
 //! ```
 //!
-//! ## Benchmarks
-//! To check out the benchmarks head on over to the benchmarks wiki page on the WaveRs <a href=https://github.com/jmg049/wavers/wiki/Benchmarks>GitHub</a>.
-//! Benchmarks were conducted on the reading and writing functionality of WaveRs and compared to the ``hound`` crate.
+//! ### Sample Type Conversion
+//!
+//! ```no_run
+//! use wavers::{Wav, ConvertTo};
+//!
+//! // Automatic conversion during read
+//! let wav = Wav::<f32>::from_path("pcm16.wav")?;
+//! let samples = wav.read()?; // Automatically converts i16 to f32
+//!
+//! // Explicit conversion
+//! let wav = Wav::<i16>::from_path("pcm16.wav")?;
+//! let samples = wav.read()?.convert::<f32>();
+//! ```
+//!
+//! ## Optional Features
+//!
+//! ### NDArray Integration
+//!
+//! Enable with `cargo add wavers --features ndarray`
+//!
+//! ```no_run
+//! # #[cfg(feature = "ndarray")]
+//! use wavers::{Wav, AsNdarray};
+//! # #[cfg(feature = "ndarray")]
+//! use ndarray::Array2;
+//!
+//! # #[cfg(feature = "ndarray")]
+//! fn example() -> wavers::WaversResult<()> {
+//!     let wav = Wav::<f32>::from_path("audio.wav")?;
+//!     let (audio_matrix, sample_rate): (Array2<f32>, i32) = wav.as_ndarray()?;
+//!     // audio_matrix shape: (samples, channels)
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ### Resampling
+//!
+//! Enable with `cargo add wavers --features resampling`
+//!
+//! ```no_run
+//! # #[cfg(feature = "resampling")]
+//! use wavers::{Wav, resample};
+//!
+//! # #[cfg(feature = "resampling")]
+//! fn example() -> wavers::WaversResult<()> {
+//!     let mut wav = Wav::<f32>::from_path("input.wav")?;
+//!     let target_fs = 48000;
+//!     let resampled = resample(&mut wav, target_fs)?;
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Implementation Details
+//!
+//! WaveRs uses a combination of techniques to achieve good performance:
+//!
+//! - Zero-copy operations where possible
+//! - Efficient memory allocation strategies
+//! - SIMD optimizations for resampling (when enabled)
+//! - Stream-based processing for large files
+//!
+//! ## Error Handling
+//!
+//! WaveRs uses the `WaversResult<T>` type alias for operations that can fail:
+//!
+//! ```no_run
+//! pub type WaversResult<T> = Result<T, WaversError>;
+//! ```
+//!
+//! Common error cases include:
+//! - Invalid file format or corrupted files
+//! - Unsupported format variations
+//! - I/O errors during reading/writing
+//! - Invalid operations (e.g., incorrect channel counts)
+//!
+//! ## Development Status
+//!
+//! WaveRs is stable and functional but under periodic development. While the core
+//! API is stable, new features and optimizations are added periodically. Current areas
+//! of development include:
+//!
+//! - Enhanced metadata support (LIST-INFO chunks)
+//! - Additional optimization opportunities
+//! - Expanded format support
+//!
+//! Contributions are welcome! See the repository README for details.
 //!
 #![cfg_attr(
     feature = "simd",
@@ -174,13 +206,12 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
-pub use crate::conversion::{AudioSample, ConvertSlice, ConvertTo};
-
 pub use crate::chunks::{FactChunk, FmtChunk, ListChunk, DATA, FACT, LIST, RIFF, WAVE};
+pub use crate::conversion::{AudioSample, ConvertSlice, ConvertTo};
 pub use crate::core::{wav_spec, ReadSeek, Samples, Wav};
 pub use crate::error::{WaversError, WaversResult};
 pub use crate::header::WavHeader;
-pub use crate::wav_type::{format_info_to_wav_type, wav_type_to_format_info, FormatCode, WavType};
+use crate::wav_type::{FormatCode, WavType};
 
 /// A macro for logging messages if the logging feature is enabled.
 #[macro_export]
@@ -309,6 +340,7 @@ where
     Ok(())
 }
 
+/// Writes wav samples to disk using the supplied header supplied.
 #[inline(always)]
 pub fn write_with_header<T: AudioSample, P: AsRef<Path>>(
     fp: P,

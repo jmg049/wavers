@@ -1,4 +1,4 @@
-/// Module containing the functionality for converting between the supported audio sample types
+//! Module containing the functionality for converting between the supported audio sample types
 use std::fmt::Debug;
 
 use bytemuck::Pod;

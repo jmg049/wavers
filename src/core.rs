@@ -1,4 +1,4 @@
-/// Module contains the core structs, ``Wav`` and ``Samples`` for working working with wav files.
+//! Module contains the core structs, ``Wav`` and ``Samples`` for working working with wav files.
 use std::alloc::Layout;
 use std::any::TypeId;
 use std::fmt::{Debug, Display};

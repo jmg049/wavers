@@ -103,7 +103,7 @@ for channel in wav.channels() {
 }
 ```
 
-Block-wise processing with overlap (useful for spectral analysis, windowing):
+Block-wise processing with overlap (useful for spectral analysis, windowing) (Requires further testing, use with caution):
 
 ```rust
 let block_size = 1024;
@@ -304,3 +304,19 @@ The benchmarks below were recorded using ``Criterion`` and each benchmark was ru
 | Writing     | Slice - Native i16        | 5.9484 ms  | 6.2091 ms   | 6.5018 ms  |
 | Writing     | Slice - Native i16 As f32 | 30.271 ms  | 33.773 ms   | 37.509 ms  |
 | Writing     | Write native f32          | 11.286 ms  | 11.948 ms   | 12.648 ms  |
+
+### Iterators
+
+| **Frame Iterator** 	| **Mono** 	| **Stereo** 	| **5.1** 	|
+|:------------------:	|:--------:	|:----------:	|:-------:	|
+| **Old**            	|   292ms  	|    280ms   	|  287ms  	|
+| **New**            	|   220us  	|    306us   	|  830us  	|
+
+| **Channel Iterator** 	| **Mono (1s)** 	| **Stereo (1s)** 	| **5.1 (1s)** 	| **Mono (10s)** 	| **Stereo (10s)** 	| **5.1 (10s)** 	|
+|----------------------	|:-------------:	|:---------------:	|:------------:	|:--------------:	|:----------------:	|:-------------:	|
+| **Old**              	|      67ms     	|      134ms      	|     404ms    	|      680ms     	|       1.35s      	| 3.9s          	|
+| **New**              	|      53us     	|      104us      	|     519us    	|      619us     	|       1.5ms      	| 9ms           	|
+
+|                    	| **Mono - Small (512, 128)** 	| **Stereo - Small (512, 128)** 	| **Mono - Large (4096, 1024)** 	| **Stereo - Large (4096, 1024)** 	| **Mono - Huge (8192, 7168)** 	| **Stereo - Huge (8192, 7186)** 	|
+|:------------------:	|:---------------------------:	|:-----------------------------:	|:-----------------------------:	|:-------------------------------:	|:----------------------------:	|:------------------------------:	|
+| **Block Iterator** 	|            931us            	|             968us             	|             162us             	|              221us              	|             121us            	|              167us             	|

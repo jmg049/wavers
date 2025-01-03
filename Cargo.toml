@@ -11,7 +11,6 @@ repository = "https://github.com/jmg049/wavers"
 documentation = "https://docs.rs/wavers"
 keywords = ["wav", "audio", "wave", "reader", "writer"]
 categories = ["encoding"]
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
 doctest = false
@@ -29,12 +28,13 @@ rubato = { version = "0.15.0", optional = true }
 i24 = { version = "1.0.1", default-features = false }
 log = { version = "0.4.22", optional = true }
 
-
 [dev-dependencies]
 approx_eq = "0.1.8"
 criterion = "0.5.1"
 rand = "0.8.5"
 hound = "3.5.0"
+tempfile = "3.14.0"
+symphonia = "0.5.4"
 
 [profile.release]
 lto = true
@@ -43,13 +43,28 @@ opt-level = 3
 panic = "abort"
 strip = true
 
-
 [profile.bench]
 inherits = "release"
 debug = true
 
 [[bench]]
 name = "benches"
+harness = false
+
+[[bench]]
+name = "frame_iter_bench"
+harness = false
+
+[[bench]]
+name = "channel_iter_bench"
+harness = false
+
+[[bench]]
+name = "block_iter_bench"
+harness = false
+
+[[bench]]
+name = "conversion_benches"
 harness = false
 
 ## add features

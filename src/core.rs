@@ -238,6 +238,81 @@ where
         }
     }
 
+    /// Reads samples directly into the provided buffer, avoiding extra allocations.
+    /// The buffer must be large enough to hold n_samples of the native type.
+    ///
+    /// # Arguments
+    /// * `buffer` - The buffer to read samples into
+    ///
+    /// # Returns
+    /// * `Ok(())` if successful
+    /// * `Err` if there was an error reading or converting samples
+    ///
+    /// # Example
+    /// ```no_run
+    /// use wavers::Wav;
+    ///
+    /// let mut wav = Wav::<f32>::from_path("audio.wav")?;
+    /// let mut buffer = vec![0.0f32; 1024];
+    /// wav.read_samples_into(&mut buffer)?;
+    /// ```
+    #[inline(always)]
+    pub fn read_samples_into(&mut self, buffer: &mut [T]) -> WaversResult<()> {
+        let native_type = self.wav_info.wav_type;
+        let native_size_bytes = native_type.n_bytes();
+        let n_samples = buffer.len();
+        let byte_buffer_size = n_samples * native_size_bytes;
+        let mut byte_buffer = alloc_box_buffer(byte_buffer_size);
+
+        // Read raw bytes
+        self.reader.read_exact(&mut byte_buffer)?;
+
+        let wav_type_from_file = self.wav_info.wav_type;
+        let desired_type = WavType::try_from(TypeId::of::<T>())?;
+
+        if wav_type_from_file == desired_type {
+            // Types match - just copy the bytes
+            buffer.copy_from_slice(cast_slice::<u8, T>(&byte_buffer));
+            return Ok(());
+        }
+
+        // Types don't match - need to convert
+        match wav_type_from_file {
+            WavType::Pcm16 | WavType::EPcm16 => {
+                let samples: &[i16] = cast_slice::<u8, i16>(&byte_buffer);
+                for (i, sample) in samples.iter().enumerate() {
+                    buffer[i] = sample.convert_to();
+                }
+            }
+            WavType::Pcm24 | WavType::EPcm24 => {
+                let samples: &[i24] = cast_slice::<u8, i24>(&byte_buffer);
+                for (i, sample) in samples.iter().enumerate() {
+                    buffer[i] = sample.convert_to();
+                }
+            }
+            WavType::Pcm32 | WavType::EPcm32 => {
+                let samples: &[i32] = cast_slice::<u8, i32>(&byte_buffer);
+                for (i, sample) in samples.iter().enumerate() {
+                    buffer[i] = sample.convert_to();
+                }
+            }
+            WavType::Float32 | WavType::EFloat32 => {
+                let samples: &[f32] = cast_slice::<u8, f32>(&byte_buffer);
+                for (i, sample) in samples.iter().enumerate() {
+                    buffer[i] = sample.convert_to();
+                }
+            }
+            WavType::Float64 | WavType::EFloat64 => {
+                let samples: &[f64] = cast_slice::<u8, f64>(&byte_buffer);
+                for (i, sample) in samples.iter().enumerate() {
+                    buffer[i] = sample.convert_to();
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Write the audio samples contained within this wav file to a new wav file.
     /// Writes the samples to the specified path with the given type ``F``.
     /// The function will return an error if there is an issue writing the file.
@@ -435,8 +510,8 @@ where
     }
 
     /// Seeks relative the current position in the wav file.
-    // Currently it is pub(crate) since it is only used by the BlockIterator, and also allows arbitrary seeking which is probably not good.
-    pub(crate) fn seek_relative(&mut self, pos: i64) -> WaversResult<u64> {
+    /// Unsafe because the function does not check if the seek goes beyond the bounds of the file.
+    pub unsafe fn seek_relative(&mut self, pos: i64) -> WaversResult<u64> {
         Ok(self.reader.seek(SeekFrom::Current(pos))?)
     }
 
@@ -1411,5 +1486,57 @@ mod core_tests {
             }
         }
         Ok(data)
+    }
+
+    #[test]
+    fn test_read_samples_into_same_type() {
+        let mut wav = Wav::<f32>::from_path("./test_resources/one_channel_i16.wav").unwrap();
+        let mut buffer = vec![0.0f32; 1024];
+        let original_samples = wav.read_samples(1024).unwrap();
+
+        wav.to_data().unwrap();
+        wav.read_samples_into(&mut buffer).unwrap();
+
+        for (i, sample) in buffer.iter().enumerate() {
+            assert_approx_eq!(*sample as f64, original_samples[i] as f64);
+        }
+    }
+
+    #[test]
+    fn test_read_samples_into_different_type() {
+        // Read i16 file into f32 buffer
+        let mut wav = Wav::<f32>::from_path("./test_resources/one_channel_i16.wav").unwrap();
+        let mut f32_buffer = vec![0.0f32; 1024];
+        let original_samples = wav.read_samples(1024).unwrap();
+
+        wav.to_data().unwrap();
+        wav.read_samples_into(&mut f32_buffer).unwrap();
+
+        for (i, sample) in f32_buffer.iter().enumerate() {
+            assert_approx_eq!(*sample as f64, original_samples[i] as f64);
+        }
+    }
+
+    #[test]
+    fn test_read_samples_into_partial() {
+        let mut wav = Wav::<f32>::from_path("./test_resources/one_channel_i16.wav").unwrap();
+
+        // First get all samples for comparison
+        let all_samples = wav.read().unwrap();
+
+        // Reset position and read in chunks
+        wav.to_data().unwrap();
+        let mut buffer = vec![0.0f32; 512];
+        wav.read_samples_into(&mut buffer).unwrap();
+
+        // Read again to get next chunk
+        let mut next_buffer = vec![0.0f32; 512];
+        wav.read_samples_into(&mut next_buffer).unwrap();
+
+        // Verify we got consecutive chunks
+        for i in 0..512 {
+            assert_approx_eq!(buffer[i] as f64, all_samples[i] as f64);
+            assert_approx_eq!(next_buffer[i] as f64, all_samples[i + 512] as f64);
+        }
     }
 }

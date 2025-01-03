@@ -91,7 +91,6 @@ where
 /// ).unwrap();
 /// ```
 #[inline(always)]
-
 pub fn resample<T: AudioSample>(wav: &mut Wav<T>, target_fs: i32) -> WaversResult<ResampleResult<T>>
 where
     i16: ConvertTo<T>,
@@ -122,6 +121,7 @@ where
     let sinc_interpolator_params = SincInterpolationParameters {
         sinc_len: 256,
         f_cutoff: 0.95,
+        oversampling_factor: 128,
         interpolation: SincInterpolationType::Linear,
         window: WindowFunction::BlackmanHarris2,
     };

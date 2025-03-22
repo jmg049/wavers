@@ -1,3 +1,4 @@
+#![allow(clippy::precedence)]
 //! Module containing functions and structs for working with Wav file headers.
 use std::{
     any::TypeId,
@@ -17,12 +18,12 @@ use crate::{
         fmt::{CbSize, ExtFmtChunkInfo, FMT_CB_SIZE, FMT_SIZE_BASE_SIZE, FMT_SIZE_EXTENDED_SIZE},
         read_chunk, Chunk, FmtChunk, DATA, FMT, RIFF, WAVE,
     },
-    conversion::AudioSample,
     core::{ReadSeek, WavInfo},
     error::{WaversError, WaversResult},
     log,
     wav_type::{format_info_to_wav_type, FormatCode, WavType},
 };
+use audio_sample::AudioSample;
 
 const _RIFF_SIZE: usize = 4; // do not count the size or RIFF id, only the WAVE id. The other chunks will be used for the remaining size
 const HEADER_FMT_BASE_SIZE: usize = 36;
@@ -145,8 +146,11 @@ impl WavHeader {
         let bits_per_sample = wav_type.n_bits();
         let data_size_bytes = n_samples * (bits_per_sample / 8) as usize;
         let fmt_data_size = match wav_type {
-            WavType::Pcm16 | WavType::Pcm24 | WavType::Pcm32 | WavType::Float32
-            | WavType::Float64=> FMT_SIZE_BASE_SIZE,
+            WavType::Pcm16
+            | WavType::Pcm24
+            | WavType::Pcm32
+            | WavType::Float32
+            | WavType::Float64 => FMT_SIZE_BASE_SIZE,
             WavType::EPcm16
             | WavType::EPcm24
             | WavType::EPcm32

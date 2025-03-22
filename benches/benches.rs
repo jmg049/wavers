@@ -4,9 +4,10 @@ use criterion::{
 
 use rand::Rng;
 
+use audio_sample::Samples;
 use i24::i24;
 use std::time::Duration;
-use wavers::{Samples, Wav};
+use wavers::Wav;
 
 macro_rules! bench_sample_conversions {
     ($c:expr, $($from_type:ty => [$($to_type:ty),+]),+) => {
@@ -160,7 +161,7 @@ macro_rules! bench_wavers_reading_for_type {
                             sample_rate as i32,
                             n_channels as u16,
                         )
-                        .unwrap();
+                        .expect("Failed to wavers::write tmp file");
 
                         b.iter(|| {
                             let mut wav =
@@ -325,7 +326,7 @@ fn bench_wavers_reading(c: &mut Criterion) {
     const SAMPLE_RATES: [usize; 3] = [8000, 16000, 44100];
     const N_CHANNELS: [usize; 2] = [1, 2];
 
-    std::fs::create_dir_all("./tmp_bench_resources").unwrap();
+    std::fs::create_dir_all("./tmp_bench_resources").expect("Failed to create tmp_bench_resources");
 
     bench_wavers_reading_for_type!(c, i16, "PCM_16");
     bench_wavers_reading_for_type!(c, i24, "PCM_24");
@@ -333,7 +334,8 @@ fn bench_wavers_reading(c: &mut Criterion) {
     bench_wavers_reading_for_type!(c, f32, "IEEE_F32");
     bench_wavers_reading_for_type!(c, f64, "IEEE_F64");
 
-    std::fs::remove_dir_all("./tmp_bench_resources").unwrap();
+    std::fs::remove_dir_all("./tmp_bench_resources")
+        .expect_err("Failed to remove tmp_bench_resources");
 }
 
 fn bench_hound_reading(c: &mut Criterion) {
@@ -424,10 +426,10 @@ fn noise(duration_sec: Duration, sample_rate: usize, n_channels: usize) -> Sampl
 
 criterion_group!(
     benches,
-    bench_wavers_reading,
-    bench_wavers_writing,
+    // bench_wavers_reading,
+    // bench_wavers_writing,
     bench_samples_conversion,
-    bench_hound_reading,
-    bench_hound_writing
+    // bench_hound_reading,
+    // bench_hound_writing
 );
 criterion_main!(benches);

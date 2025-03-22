@@ -1,15 +1,41 @@
-/// Module contains the core structs, ``Wav`` and ``Samples`` for working working with wav files.
+// Correctness and logic
+#![warn(clippy::unit_cmp)] // Detects comparing unit types
+#![warn(clippy::match_same_arms)] // Duplicate match arms
+#![warn(clippy::unreachable)] // Detects unreachable code
+
+// Performance-focused
+#![warn(clippy::inefficient_to_string)] // `format!("{}", x)` vs `x.to_string()`
+#![warn(clippy::map_clone)] // Cloning inside `map()` unnecessarily
+#![warn(clippy::unnecessary_to_owned)] // Detects redundant `.to_owned()` or `.clone()`
+#![warn(clippy::large_stack_arrays)] // Helps avoid stack overflows
+#![warn(clippy::box_collection)] // Warns on boxed `Vec`, `String`, etc.
+#![warn(clippy::vec_box)] // Avoids using `Vec<Box<T>>` when unnecessary
+#![warn(clippy::needless_collect)] // Avoids `.collect().iter()` chains
+
+// Style and idiomatic Rust
+#![warn(clippy::redundant_clone)] // Detects unnecessary `.clone()`
+#![warn(clippy::identity_op)] // e.g., `x + 0`, `x * 1`
+#![warn(clippy::needless_return)] // Avoids `return` at the end of functions
+#![warn(clippy::let_unit_value)] // Avoids binding `()` to variables
+#![warn(clippy::manual_map)] // Use `.map()` instead of manual `match`
+
+// Maintainability
+#![warn(clippy::missing_panics_doc)] // Docs for functions that might panic
+#![warn(clippy::missing_safety_doc)] // Docs for `unsafe` functions
+#![warn(clippy::missing_const_for_fn)] // Suggests making eligible functions `const`
+
+//! Module contains the core structs, ``Wav`` and ``Samples`` for working working with wav files.
+use audio_sample::{AudioSample, ConvertSequence, ConvertTo, Samples};
+use i24::i24;
 use std::alloc::Layout;
 use std::any::TypeId;
 use std::fmt::{Debug, Display};
 use std::fs::File;
 use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
-use std::ops::{Deref, DerefMut};
+use std::mem::{align_of, size_of};
 use std::path::Path;
+use std::slice;
 use std::time::Duration;
-
-use bytemuck::cast_slice;
-use i24::i24;
 
 #[cfg(feature = "ndarray")]
 use ndarray::{Array, Array2};
@@ -22,9 +48,7 @@ use pyo3::prelude::*;
 
 use crate::chunks::{read_chunk, Chunk, ListChunk};
 use crate::chunks::{DATA, FACT, LIST};
-use crate::conversion::ConvertSlice;
 
-use crate::conversion::{AudioSample, ConvertTo};
 use crate::error::{FormatError, WaversError, WaversResult};
 use crate::header::{read_header, ChunkIdentifier, HeaderChunkInfo, WavHeader};
 use crate::iter::{BlockIterator, ChannelIterator, FrameIterator};
@@ -48,11 +72,6 @@ where
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
-    Box<[i16]>: ConvertSlice<T>,
-    Box<[i24]>: ConvertSlice<T>,
-    Box<[i32]>: ConvertSlice<T>,
-    Box<[f32]>: ConvertSlice<T>,
-    Box<[f64]>: ConvertSlice<T>,
 {
     _phantom: std::marker::PhantomData<T>,
     reader: Box<dyn ReadSeek>,
@@ -66,11 +85,6 @@ where
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
-    Box<[i16]>: ConvertSlice<T>,
-    Box<[i24]>: ConvertSlice<T>,
-    Box<[i32]>: ConvertSlice<T>,
-    Box<[f32]>: ConvertSlice<T>,
-    Box<[f64]>: ConvertSlice<T>,
 {
     /// Construct a new Wav struct from a boxed reader.
     pub fn new(mut reader: Box<dyn ReadSeek>) -> WaversResult<Self> {
@@ -100,7 +114,7 @@ where
     ///
     /// Resets the reader to the start of the data chunk after it has finished reading.
     ///
-    /// Returns a ``WaversResult`` containing a ``Samples`` struct or an error.
+    /// Returns a [WaversResult] containing a [Samples] struct or an error.
     ///
     /// # Example
     /// ```no_run
@@ -151,7 +165,7 @@ where
     ///
     /// Reading can later be resumed.
     ///
-    /// Returns a ``WaversResult`` containing a ``Samples`` struct or an error.
+    /// Returns a [WaversResult] containing a [Samples] struct or an error.
     #[inline(always)]
     pub fn read_samples(&mut self, n_samples: usize) -> WaversResult<Samples<T>> {
         let native_type = self.wav_info.wav_type;
@@ -167,29 +181,30 @@ where
         let desired_type = WavType::try_from(TypeId::of::<T>())?;
         log!(log::Level::Debug, "Desired type: {:?}", desired_type);
         if wav_type_from_file == desired_type {
-            return Ok(Samples::from(cast_slice::<u8, T>(&samples)));
+            let native_data: Box<[T]> = reinterpret_boxed_slice(samples);
+            return Ok(Samples::from(native_data)); // samples now takes ownership
         }
 
         match wav_type_from_file {
             WavType::Pcm16 | WavType::EPcm16 => {
-                let samples: &[i16] = cast_slice::<u8, i16>(&samples);
+                let samples: Box<[i16]> = reinterpret_boxed_slice(samples);
                 Ok(Samples::from(samples).convert())
             }
             WavType::Pcm24 | WavType::EPcm24 => {
                 // Read the samples as i32 first and then convert
-                let samples: &[i24] = cast_slice::<u8, i24>(&samples);
+                let samples: Box<[i24]> = reinterpret_boxed_slice(samples);
                 Ok(Samples::from(samples).convert())
             }
             WavType::Pcm32 | WavType::EPcm32 => {
-                let samples: &[i32] = cast_slice::<u8, i32>(&samples);
+                let samples: Box<[i32]> = reinterpret_boxed_slice(samples);
                 Ok(Samples::from(samples).convert())
             }
             WavType::Float32 | WavType::EFloat32 => {
-                let samples: &[f32] = cast_slice::<u8, f32>(&samples);
+                let samples: Box<[f32]> = reinterpret_boxed_slice(samples);
                 Ok(Samples::from(samples).convert())
             }
             WavType::Float64 | WavType::EFloat64 => {
-                let samples: &[f64] = cast_slice::<u8, f64>(&samples);
+                let samples: Box<[f64]> = reinterpret_boxed_slice(samples);
                 Ok(Samples::from(samples).convert())
             }
         }
@@ -242,10 +257,10 @@ where
     /// Writes the samples to the specified path with the given type ``F``.
     /// The function will return an error if there is an issue writing the file.
     #[inline(always)]
-    pub fn write<F: AudioSample, P: AsRef<Path>>(&mut self, p: P) -> WaversResult<()>
+    pub fn write<F: AudioSample + ConvertTo<T>, P: AsRef<Path>>(&mut self, p: P) -> WaversResult<()>
     where
         T: ConvertTo<F>,
-        Box<[T]>: ConvertSlice<F>,
+        Box<[F]>: ConvertSequence<T>,
     {
         log!(log::Level::Debug, "Writing to file: {:?}", p.as_ref());
         let samples = self.read()?.convert::<F>();
@@ -270,7 +285,7 @@ where
                 buf_writer.write_all(&header_bytes)?;
             }
             (FormatCode::WAV_FORMAT_IEEE_FLOAT, _) => {
-                let header_bytes = self.wav_info.wav_header.as_base_bytes(); 
+                let header_bytes = self.wav_info.wav_header.as_base_bytes();
                 buf_writer.write_all(&header_bytes)?;
             }
             (FormatCode::WAVE_FORMAT_EXTENSIBLE, FormatCode::WAV_FORMAT_PCM) => {
@@ -492,11 +507,6 @@ where
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
-    Box<[i16]>: ConvertSlice<T>,
-    Box<[i24]>: ConvertSlice<T>,
-    Box<[i32]>: ConvertSlice<T>,
-    Box<[f32]>: ConvertSlice<T>,
-    Box<[f64]>: ConvertSlice<T>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let type_str = std::any::type_name::<T>();
@@ -521,11 +531,6 @@ where
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
-    Box<[i16]>: ConvertSlice<T>,
-    Box<[i24]>: ConvertSlice<T>,
-    Box<[i32]>: ConvertSlice<T>,
-    Box<[f32]>: ConvertSlice<T>,
-    Box<[f64]>: ConvertSlice<T>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let type_str = std::any::type_name::<T>();
@@ -569,31 +574,24 @@ where
     }
 }
 
-#[cfg(feature = "ndarray")]
-use crate::conversion::{AsNdarray, IntoNdarray};
+// #[cfg(feature = "ndarray")]
+// use crate::conversion::{AsNdarray, IntoNdarray};
 
-#[cfg(feature = "ndarray")]
-impl<T: AudioSample> IntoNdarray for Wav<T>
-where
-    i16: ConvertTo<T>,
-    i24: ConvertTo<T>,
-    i32: ConvertTo<T>,
-    f32: ConvertTo<T>,
-    f64: ConvertTo<T>,
-{
-    type Target = T;
+// #[cfg(feature = "ndarray")]
+// impl<T: AudioSample> IntoNdarray for Wav<T> {
+//     type Target = T;
 
-    fn into_ndarray(mut self) -> WaversResult<(Array2<Self::Target>, i32)> {
-        let n_channels = self.header().fmt_chunk.channels as usize;
+//     fn into_ndarray(mut self) -> WaversResult<(Array2<Self::Target>, i32)> {
+//         let n_channels = self.header().fmt_chunk.channels as usize;
 
-        let copied_data: &[T] = &self.read()?.samples;
-        let length = copied_data.len();
-        let shape = (length / n_channels, n_channels); // correct format (as per everyone else) is n_channels, n_samples
+//         let copied_data: &[T] = &self.read()?.samples;
+//         let length = copied_data.len();
+//         let shape = (length / n_channels, n_channels); // correct format (as per everyone else) is n_channels, n_samples
 
-        let arr: Array2<T> = Array::from_shape_vec(shape, copied_data.to_vec())?;
-        Ok((arr, self.sample_rate()))
-    }
-}
+//         let arr: Array2<T> = Array::from_shape_vec(shape, copied_data.to_vec())?;
+//         Ok((arr, self.sample_rate()))
+//     }
+// }
 
 #[cfg(feature = "ndarray")]
 impl<T: AudioSample> AsNdarray for Wav<T>
@@ -617,164 +615,6 @@ where
         Ok((arr, self.sample_rate()))
     }
 }
-
-/// Wrapper struct around a boxed slice of samples.
-/// Wrapping allows the extension of the struct to include more functionality.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Samples<T>
-where
-    T: AudioSample,
-{
-    pub(crate) samples: Box<[T]>,
-}
-
-impl<T> AsRef<[T]> for Samples<T>
-where
-    T: AudioSample,
-{
-    fn as_ref(&self) -> &[T] {
-        &self.samples
-    }
-}
-
-impl<T> AsMut<[T]> for Samples<T>
-where
-    T: AudioSample,
-{
-    fn as_mut(&mut self) -> &mut [T] {
-        &mut self.samples
-    }
-}
-
-impl<T> Deref for Samples<T>
-where
-    T: AudioSample,
-{
-    type Target = [T];
-
-    fn deref(&self) -> &Self::Target {
-        &self.samples
-    }
-}
-
-impl<T> DerefMut for Samples<T>
-where
-    T: AudioSample,
-{
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.samples
-    }
-}
-
-// From Vec
-impl<T> From<Vec<T>> for Samples<T>
-where
-    T: AudioSample,
-{
-    fn from(samples: Vec<T>) -> Self {
-        Samples {
-            samples: samples.into_boxed_slice(),
-        }
-    }
-}
-
-// From Slice
-impl<T> From<&[T]> for Samples<T>
-where
-    T: AudioSample,
-{
-    fn from(samples: &[T]) -> Self {
-        Samples {
-            samples: Box::from(samples),
-        }
-    }
-}
-
-// From boxed slice
-impl<T> From<Box<[T]>> for Samples<T>
-where
-    T: AudioSample,
-{
-    fn from(samples: Box<[T]>) -> Self {
-        Samples { samples }
-    }
-}
-
-// From u8 Buffer
-impl<T> From<&[u8]> for Samples<T>
-where
-    T: AudioSample,
-{
-    fn from(bytes: &[u8]) -> Self {
-        let casted_samples: &[T] = cast_slice::<u8, T>(bytes);
-        Samples {
-            samples: Box::from(casted_samples),
-        }
-    }
-}
-
-#[cfg(feature = "ndarray")]
-impl<T> From<Array2<T>> for Samples<T>
-where
-    T: AudioSample,
-{
-    fn from(value: Array2<T>) -> Self {
-        Samples {
-            samples: value.into_raw_vec().into_boxed_slice(),
-        }
-    }
-}
-
-impl<T> Display for Samples<T>
-where
-    T: AudioSample + Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", &self.samples)
-    }
-}
-
-impl<T> Samples<T>
-where
-    T: AudioSample,
-{
-    /// Construct a new Samples struct from a boxed slice of audio samples.
-    pub fn new(samples: Box<[T]>) -> Self {
-        Self { samples }
-    }
-
-    /// Conversts the samples to the specified type ``F``. If the type is the same as the current type, the function will return self.
-    /// The function will consume the current Samples struct and return a new Samples struct with the specified type.
-    #[inline(always)]
-    pub fn convert<F: AudioSample>(self) -> Samples<F>
-    where
-        T: ConvertTo<F>,
-        Box<[T]>: ConvertSlice<F>,
-    {
-        // Quick check to see if we're converting to the same type, if so, just return self
-        if TypeId::of::<T>() == TypeId::of::<F>() {
-            let data: Box<[T]> = self.samples.clone();
-            return Samples {
-                samples: Box::from(cast_slice::<T, F>(&data)),
-            };
-        }
-        let converted_samples = self.samples.convert_slice();
-        Samples {
-            samples: converted_samples,
-        }
-    }
-
-    /// Converts the boxed slice of samples to the corresponding bytes.
-    pub fn as_bytes(&self) -> &[u8] {
-        cast_slice::<T, u8>(&self.samples)
-    }
-}
-
-impl Samples<i16> {}
-impl Samples<i24> {}
-impl Samples<i32> {}
-impl Samples<f32> {}
-impl Samples<f64> {}
 
 /// Helper function to allocate a fixed sized, heap allocated buffer of bytes.
 pub(crate) fn alloc_box_buffer(len: usize) -> Box<[u8]> {
@@ -808,6 +648,33 @@ where
     let ptr = unsafe { std::alloc::alloc(layout) as *mut T };
     let slice_ptr: *mut [T] = core::ptr::slice_from_raw_parts_mut(ptr, len);
     unsafe { Box::from_raw(slice_ptr) }
+}
+
+pub(crate) fn reinterpret_boxed_slice<T: AudioSample>(bytes: Box<[u8]>) -> Box<[T]> {
+    assert_eq!(
+        bytes.len() % size_of::<T>(),
+        0,
+        "Invalid byte length for target type"
+    );
+
+    // Ensure proper alignment
+    let align = align_of::<T>();
+    let ptr = Box::into_raw(bytes);
+    let (raw_ptr, len) = (ptr as *mut u8, unsafe { (*ptr).len() / size_of::<T>() });
+
+    assert!(
+        (raw_ptr as usize) % align == 0,
+        "Box<[u8]> is not properly aligned for target type"
+    );
+
+    let t_ptr = raw_ptr as *mut T;
+
+    // SAFETY:
+    // - `t_ptr` is properly aligned due to the check above
+    // - The length was already asserted to match up
+    // - Ownership of the original `Box<[u8]>` has been moved
+    // - Layout is assumed to be correct (trusted source [me :)])
+    unsafe { Box::from_raw(slice::from_raw_parts_mut(t_ptr, len)) }
 }
 
 #[cfg(test)]
@@ -1060,12 +927,9 @@ mod core_tests {
             );
 
             assert_eq!(
-                data_chunk_size,
-                expected_data_size,
+                data_chunk_size, expected_data_size,
                 "Data chunk size incorrect for {}: expected {}, got {}",
-                test_name,
-                expected_data_size,
-                data_chunk_size
+                test_name, expected_data_size, data_chunk_size
             );
 
             // Clean up
@@ -1206,7 +1070,7 @@ mod core_tests {
         for i in 0..8 {
             test_data.push(i);
         }
-        let s_data: &[i16] = test_data.as_slice();
+        let s_data: Box<[i16]> = test_data.into_boxed_slice();
         let samples: Samples<i16> = Samples::from(s_data);
         let bytes = samples.as_bytes();
 
@@ -1318,8 +1182,7 @@ mod core_tests {
         let expected_samples: Vec<i32> =
             read_text_to_vec(Path::new(ONE_CHANNEL_EXPECTED_I24)).unwrap();
         let expected_samples: Box<[i32]> = expected_samples.into_boxed_slice();
-        let expected_samples: Box<[i24]> = expected_samples.convert_slice();
-
+        let expected_samples: Box<[i24]> = expected_samples.convert_sequence();
         assert_eq!(samples.len(), expected_samples.len(), "Lengths not equal");
 
         for (idx, (expected, actual)) in expected_samples.iter().zip(samples).enumerate() {
@@ -1339,7 +1202,7 @@ mod core_tests {
         let expected_samples: Vec<i32> =
             read_text_to_vec(Path::new(ONE_CHANNEL_EXPECTED_I24)).unwrap();
         let expected_samples: Box<[i32]> = expected_samples.into_boxed_slice();
-        let expected_samples: Box<[i24]> = expected_samples.convert_slice();
+        let expected_samples: Box<[i24]> = expected_samples.convert_sequence();
 
         assert_eq!(samples.len(), expected_samples.len(), "Lengths not equal");
 
@@ -1367,7 +1230,7 @@ mod core_tests {
             assert_eq!(
                 channel.len(),
                 reference.len(),
-                "Lengths not equal: Channel {}",
+                "Lengths not equal: Channel {:?}",
                 channel
             );
             for (expected, actual) in reference.iter().zip(channel.as_ref()) {

@@ -3,7 +3,9 @@
 //! - The ChannelIterator iterates over the channels of the Wav file.
 //! - The BlockIterator iterates over blocks of the Wav file with an optional overlap.
 
-use crate::{core::alloc_sample_buffer, i24, AudioSample, ConvertSlice, ConvertTo, Samples, Wav};
+use crate::{core::alloc_sample_buffer, Wav};
+use audio_sample::{AudioSample, ConvertTo, Samples};
+use i24::i24;
 
 /// A frame iterator for the Wav struct.
 /// WaveRs defines a frame as a collection of samples, where each sample is a single value from a single channel.
@@ -19,11 +21,6 @@ where
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
-    Box<[i16]>: ConvertSlice<T>,
-    Box<[i24]>: ConvertSlice<T>,
-    Box<[i32]>: ConvertSlice<T>,
-    Box<[f32]>: ConvertSlice<T>,
-    Box<[f64]>: ConvertSlice<T>,
 {
     max_pos: u64,
     wav: &'a mut Wav<T>,
@@ -36,11 +33,6 @@ where
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
-    Box<[i16]>: ConvertSlice<T>,
-    Box<[i24]>: ConvertSlice<T>,
-    Box<[i32]>: ConvertSlice<T>,
-    Box<[f32]>: ConvertSlice<T>,
-    Box<[f64]>: ConvertSlice<T>,
 {
     pub fn new(max_pos: u64, wav: &'a mut Wav<T>) -> FrameIterator<'a, T> {
         FrameIterator { max_pos, wav }
@@ -54,11 +46,6 @@ where
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
-    Box<[i16]>: ConvertSlice<T>,
-    Box<[i24]>: ConvertSlice<T>,
-    Box<[i32]>: ConvertSlice<T>,
-    Box<[f32]>: ConvertSlice<T>,
-    Box<[f64]>: ConvertSlice<T>,
 {
     type Item = Samples<T>;
 
@@ -107,11 +94,6 @@ where
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
-    Box<[i16]>: ConvertSlice<T>,
-    Box<[i24]>: ConvertSlice<T>,
-    Box<[i32]>: ConvertSlice<T>,
-    Box<[f32]>: ConvertSlice<T>,
-    Box<[f64]>: ConvertSlice<T>,
 {
     wav: &'a mut Wav<T>,
     current_channel: usize,
@@ -125,18 +107,13 @@ where
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
-    Box<[i16]>: ConvertSlice<T>,
-    Box<[i24]>: ConvertSlice<T>,
-    Box<[i32]>: ConvertSlice<T>,
-    Box<[f32]>: ConvertSlice<T>,
-    Box<[f64]>: ConvertSlice<T>,
 {
     pub fn new(wav: &'a mut Wav<T>) -> ChannelIterator<'a, T> {
         let n_samples_per_channel = wav.n_samples() as usize / wav.n_channels() as usize;
         ChannelIterator {
             wav,
             current_channel: 0,
-            n_samples_per_channel: n_samples_per_channel,
+            n_samples_per_channel,
         }
     }
 }
@@ -148,11 +125,6 @@ where
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
-    Box<[i16]>: ConvertSlice<T>,
-    Box<[i24]>: ConvertSlice<T>,
-    Box<[i32]>: ConvertSlice<T>,
-    Box<[f32]>: ConvertSlice<T>,
-    Box<[f64]>: ConvertSlice<T>,
 {
     type Item = Samples<T>;
 
@@ -216,11 +188,6 @@ where
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
-    Box<[i16]>: ConvertSlice<T>,
-    Box<[i24]>: ConvertSlice<T>,
-    Box<[i32]>: ConvertSlice<T>,
-    Box<[f32]>: ConvertSlice<T>,
-    Box<[f64]>: ConvertSlice<T>,
 {
     wav: &'a mut Wav<T>,
     block_size: usize,
@@ -229,6 +196,7 @@ where
     total_blocks: usize,
     final_block_size: usize,
 }
+
 impl<'a, T: 'a + AudioSample> BlockIterator<'a, T>
 where
     i16: ConvertTo<T>,
@@ -236,11 +204,6 @@ where
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
-    Box<[i16]>: ConvertSlice<T>,
-    Box<[i24]>: ConvertSlice<T>,
-    Box<[i32]>: ConvertSlice<T>,
-    Box<[f32]>: ConvertSlice<T>,
-    Box<[f64]>: ConvertSlice<T>,
 {
     pub fn new(wav: &'a mut Wav<T>, block_size: usize, overlap: usize) -> BlockIterator<'a, T> {
         assert!(block_size > 0, "Block size must be positive");
@@ -294,11 +257,6 @@ where
     i32: ConvertTo<T>,
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
-    Box<[i16]>: ConvertSlice<T>,
-    Box<[i24]>: ConvertSlice<T>,
-    Box<[i32]>: ConvertSlice<T>,
-    Box<[f32]>: ConvertSlice<T>,
-    Box<[f64]>: ConvertSlice<T>,
 {
     type Item = Samples<T>;
 

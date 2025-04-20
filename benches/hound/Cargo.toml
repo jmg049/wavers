@@ -1,0 +1,10 @@
+[package]
+name = "hound_bench"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+hound = "3.5.1"
+rand = "0.9.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

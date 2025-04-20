@@ -1,49 +1,485 @@
-//! This module contains the ``Chunk`` trait and the constants relating to the different chunks in a wav file.
+use crate::{WaversErrorKind, WaversResult};
+use std::{
+    fmt::{Debug, Display},
+    ops::Deref,
+};
 
-pub mod fact;
-pub mod fmt;
-pub mod list;
+/// Module containing the data chunk implementation
+pub(crate) mod data;
+/// Module containing the format chunk implementation
+pub(crate) mod fmt;
 
-use std::fmt::Display;
+pub(crate) mod riff;
 
-pub use crate::chunks::fact::FactChunk;
-pub use crate::chunks::fmt::FmtChunk;
-pub use crate::chunks::list::ListChunk;
-use crate::{header::HeaderChunkInfo, ReadSeek, WaversResult};
+pub(crate) use riff::RIFFChunk;
 
-// 100% necessary to have these chunks
 
-///The RIFF chunk ID "RIFF"
-pub const RIFF: [u8; 4] = *b"RIFF";
-/// The WAVE chunk ID "WAVE"
-pub const WAVE: [u8; 4] = *b"WAVE";
-/// The data chunk ID "data"
-pub const DATA: [u8; 4] = *b"data";
-/// The fmt chunk ID "fmt "
-pub const FMT: [u8; 4] = *b"fmt ";
+/// Standard RIFF chunk identifier
+pub const RIFF: ChunkID = ChunkID::new(*b"RIFF");
+/// WAV format identifier
+pub const WAVE: ChunkID = ChunkID::new(*b"WAVE");
+/// Format chunk identifier
+pub const FMT: ChunkID = ChunkID::new(*b"fmt ");
+/// Data chunk identifier
+pub const DATA: ChunkID = ChunkID::new(*b"data");
+/// List chunk identifier
+pub const LIST: ChunkID = ChunkID::new(*b"LIST");
+/// Fact chunk identifier
+pub const FACT: ChunkID = ChunkID::new(*b"fact");
+/// Info chunk identifier
+pub const INFO: ChunkID = ChunkID::new(*b"INFO");
+/// Peak chunk identifier
+pub const PEAK: ChunkID = ChunkID::new(*b"PEAK");
 
-// Optional chunks
-/// The fact chunk ID "fact"
-pub const LIST: [u8; 4] = *b"LIST";
-/// The fact chunk ID "fact"
-pub const FACT: [u8; 4] = *b"fact";
+pub const fn validate_tag(tag: ChunkID) -> WaversResult<()> {
+    if chunk_eq(tag.id, RIFF.id) {
+        return Ok(());
+    }
 
-/// A trait representing a chunk in a wav file.
-/// Allows for the common creation of several chunks that are found in a wav file.
-/// Requires them to implement common decoding and encoding methods.
-pub trait Chunk: Display {
-    fn id(&self) -> &[u8; 4];
-    fn size(&self) -> u32;
-    fn as_bytes(&self) -> Box<[u8]>;
-    fn from_reader(reader: &mut Box<dyn ReadSeek>, info: &HeaderChunkInfo) -> WaversResult<Self>
-    where
-        Self: Sized;
+    if chunk_eq(tag.id, WAVE.id) {
+        return Ok(());
+    }
+
+    if chunk_eq(tag.id, FMT.id) {
+        return Ok(());
+    }
+
+    if chunk_eq(tag.id, DATA.id) {
+        return Ok(());
+    }
+
+    if chunk_eq(tag.id, LIST.id) {
+        return Ok(());
+    }
+
+    if chunk_eq(tag.id, FACT.id) {
+        return Ok(());
+    }
+
+    if chunk_eq(tag.id, INFO.id) {
+        return Ok(());
+    }
+
+    if chunk_eq(tag.id, PEAK.id) {
+        return Ok(());
+    }
+
+    Err(WaversErrorKind::InvalidChunkType)
 }
 
-/// Read a chunk from a wav file.
-pub fn read_chunk<T: Chunk>(
-    reader: &mut Box<dyn ReadSeek>,
-    info: &HeaderChunkInfo,
-) -> WaversResult<T> {
-    T::from_reader(reader, info)
+/// A WAV file chunk, consisting of an identifier, size, and data
+///
+/// Chunks are the fundamental building blocks of RIFF/WAV files.
+/// Each chunk contains a 4-byte identifier, a 4-byte size field,
+/// and the actual chunk data.
+#[derive(Debug)]
+pub struct Chunk<'a> {
+    /// The 4-byte identifier of the chunk
+    pub id: &'static ChunkID,
+    /// The actual chunk data
+    pub data: &'a [u8],
+}
+
+impl<'a> Chunk<'a> {
+    /// Creates a new chunk with the given identifier, size, and data
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The chunk identifier
+    /// * `data` - The chunk data
+    ///
+    /// # Returns
+    ///
+    /// A new Chunk instance
+    pub const fn new(id: &'static ChunkID, data: &'a [u8]) -> Self {
+        Self { id, data }
+    }
+
+    /// Gets the total size of the chunk including the 8-byte header
+    ///
+    /// # Returns
+    ///
+    /// The total size in bytes
+    pub const fn total_size(&self) -> u32 {
+        // 4 bytes for ID + 4 bytes for size + actual data size
+        8 + self.data.len() as u32
+    }
+
+    /// Checks if this chunk has a specific ID
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The chunk ID to check against
+    ///
+    /// # Returns
+    ///
+    /// `true` if the chunk has the specified ID, otherwise `false`
+    pub fn has_id(&self, id: &ChunkID) -> bool {
+        self.id == id
+    }
+
+    pub fn size(&self) -> u32 {
+        self.data.len() as u32
+    }
+}
+
+impl<'a> Display for Chunk<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Chunk {{ id: {}, size: {} bytes }}",
+            self.id,
+            self.data.len()
+        )
+    }
+}
+
+/// A 4-byte chunk identifier
+///
+/// Chunk identifiers in RIFF/WAV files are 4-byte ASCII codes that
+/// identify the type of chunk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ChunkID {
+    /// The 4-byte identifier
+    pub id: [u8; 4],
+}
+
+pub const fn chunk_eq(a: [u8; 4], b: [u8; 4]) -> bool {
+    a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3]
+}
+
+impl Deref for ChunkID {
+    type Target = [u8; 4];
+    fn deref(&self) -> &Self::Target {
+        &self.id
+    }
+}
+
+impl AsRef<[u8]> for ChunkID {
+    fn as_ref(&self) -> &[u8] {
+        &self.id
+    }
+}
+
+impl ChunkID {
+    /// Creates a new chunk identifier
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The 4-byte identifier
+    ///
+    /// # Returns
+    ///
+    /// A new ChunkID instance
+    pub const fn new(id: [u8; 4]) -> Self {
+        Self { id }
+    }
+
+    /// Returns the identifier as a string, if it's valid ASCII
+    ///
+    /// # Returns
+    ///
+    /// The identifier as a string
+    pub fn as_str(&self) -> String {
+        String::from_utf8_lossy(&self.id).to_string()
+    }
+
+    /// Checks if this identifier matches a specific 4-byte sequence
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The 4-byte sequence to check against
+    ///
+    /// # Returns
+    ///
+    /// `true` if the identifier matches, otherwise `false`
+    pub fn matches(&self, id: &[u8; 4]) -> bool {
+        self.id == *id
+    }
+}
+
+impl Display for ChunkID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", String::from_utf8_lossy(&self.id))
+    }
+}
+
+/// Information about a chunk's location and size in a file
+///
+/// This structure holds metadata about a chunk without containing
+/// the actual chunk data, useful for mapping a WAV file structure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChunkInfo {
+    pub id: ChunkID,
+    /// The offset of the chunk in the file (in bytes)
+    pub offset: usize,
+    /// The size of the chunk data (in bytes)
+    pub size: u32,
+}
+
+impl ChunkInfo {
+    /// Creates a new chunk info with the given offset and size
+    ///
+    /// # Arguments
+    ///
+    /// * `offset` - The offset of the chunk in the file
+    /// * `size` - The size of the chunk data
+    ///
+    /// # Returns
+    ///
+    /// A new ChunkInfo instance
+    pub const fn new(id: ChunkID, offset: usize, size: u32) -> Self {
+        Self { id, offset, size }
+    }
+
+    /// Gets the end position of the chunk in the file
+    ///
+    /// # Returns
+    ///
+    /// The end position (offset + 8 + size)
+    pub fn end_position(&self) -> usize {
+        self.offset + 8 + self.size as usize
+    }
+
+    /// Checks if this chunk overlaps with another chunk
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - The other chunk info to check against
+    ///
+    /// # Returns
+    ///
+    /// `true` if the chunks overlap, otherwise `false`
+    pub fn overlaps_with(&self, other: &ChunkInfo) -> bool {
+        let self_start = self.offset;
+        let self_end = self.end_position();
+        let other_start = other.offset;
+        let other_end = other.end_position();
+
+        // Check if either chunk's range overlaps with the other
+        (self_start <= other_start && other_start < self_end)
+            || (other_start <= self_start && self_start < other_end)
+    }
+}
+
+impl Display for ChunkInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "ChunkInfo {{ offset: {}, size: {} bytes }}",
+            self.offset, self.size
+        )
+    }
+}
+
+impl From<(ChunkID, usize, u32)> for ChunkInfo {
+    fn from((id, offset, size): (ChunkID, usize, u32)) -> Self {
+        Self::new(id, offset, size)
+    }
+}
+
+/// Helper function to check if a chunk is valid
+///
+/// This validates that a chunk's data size matches the declared size.
+///
+/// # Arguments
+///
+/// * `chunk` - The chunk to validate
+///
+/// # Returns
+///
+/// `true` if the chunk is valid, otherwise `false`
+pub fn is_valid_chunk(chunk: &Chunk) -> bool {
+    chunk.size() as usize == chunk.data.len()
+}
+
+/// Helper function to align a chunk size to an even number of bytes
+///
+/// RIFF/WAV chunks should be aligned to even byte boundaries.
+/// If a chunk has an odd size, it's padded with a single byte.
+///
+/// # Arguments
+///
+/// * `size` - The size to align
+///
+/// # Returns
+///
+/// The aligned size
+pub fn align_chunk_size(size: u32) -> u32 {
+    // If size is odd, add a padding byte
+    if size % 2 == 1 {
+        size + 1
+    } else {
+        size
+    }
+}
+
+/// Manager for WAV file chunks
+///
+/// The ChunkManager provides a container and utilities for working with
+/// a collection of chunks in a WAV file.
+#[derive(Debug)]
+pub struct ChunkManager {
+    /// The collection of chunks in the WAV file
+    chunks: Vec<ChunkInfo>,
+}
+
+impl ChunkManager {
+    /// Creates a new empty ChunkManager
+    ///
+    /// # Returns
+    ///
+    /// A new ChunkManager instance with no chunks
+    pub fn new() -> Self {
+        Self {
+            chunks: Vec::with_capacity(4), // Pre-allocate for a small set of wav chunks, RIFF,
+                                           // FMT, DATA, EXTRA
+        }
+    }
+
+    /// Creates a new ChunkManager with a pre-populated list of chunks
+    ///
+    /// # Arguments
+    ///
+    /// * `chunks` - A vector of chunks to initialize the manager with
+    ///
+    /// # Returns
+    ///
+    /// A new ChunkManager containing the provided chunks
+    pub fn with_chunks(chunks: Vec<ChunkInfo>) -> Self {
+        Self { chunks }
+    }
+
+    /// Adds a chunk to the manager
+    ///
+    /// # Arguments
+    ///
+    /// * `chunk` - The chunk to add
+    pub fn add_chunk_info(&mut self, chunk_info: ChunkInfo) {
+        self.chunks.push(chunk_info);
+    }
+
+    pub fn get_chunk_info(&self, chunk_id: &ChunkID) -> Option<&ChunkInfo> {
+        self.chunks.iter().find(|info| info.id == *chunk_id)
+    }
+
+    pub fn contains_id(&self, chunk_id: &ChunkID) -> bool {
+        self.get_chunk_info(chunk_id).is_some()
+    }
+
+    /// Gets the total number of chunks
+    ///
+    /// # Returns
+    ///
+    /// The number of chunks in the manager
+    pub fn len(&self) -> usize {
+        self.chunks.len()
+    }
+
+    /// Checks if the manager is empty
+    ///
+    /// # Returns
+    ///
+    /// `true` if there are no chunks, otherwise `false`
+    pub fn is_empty(&self) -> bool {
+        self.chunks.is_empty()
+    }
+
+    /// Gets an iterator over all chunks
+    ///
+    /// # Returns
+    ///
+    /// An iterator yielding references to all chunks
+    pub fn iter(&self) -> impl Iterator<Item = &ChunkInfo> {
+        self.chunks.iter()
+    }
+
+    /// Gets a mutable iterator over all chunks
+    ///
+    /// # Returns
+    ///
+    /// An iterator yielding mutable references to all chunks
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut ChunkInfo> {
+        self.chunks.iter_mut()
+    }
+
+    /// Gets a reference to the underlying chunk vector
+    ///
+    /// # Returns
+    ///
+    /// A reference to the vector of chunks
+    pub fn as_slice(&self) -> &[ChunkInfo] {
+        &self.chunks
+    }
+
+    /// Clears all chunks from the manager
+    pub fn clear(&mut self) {
+        self.chunks.clear();
+    }
+
+    pub fn get_start(&self) -> WaversResult<usize> {
+        if self.is_empty() {
+            return Err(WaversErrorKind::InvalidOp(
+                "Called get_start on empty chunk manager.".to_string(),
+            ));
+        }
+        Ok(self.get_chunk_info(&RIFF).unwrap().offset)
+    }
+
+    pub fn get_end(&self) -> WaversResult<usize> {
+        if self.is_empty() {
+            return Err(WaversErrorKind::InvalidOp(
+                "Called get_end on empty chunk manager.".to_string(),
+            ));
+        }
+        Ok(self
+            .chunks
+            .iter()
+            .max_by(|info_a, info_b| info_a.offset.cmp(&info_b.offset))
+            .unwrap()
+            .offset)
+    }
+}
+
+impl Default for ChunkManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Display for ChunkManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "ChunkManager containing {} chunks:", self.chunks.len())?;
+        for (idx, chunk) in self.chunks.iter().enumerate() {
+            writeln!(f, "  [{}]: {}", idx, chunk)?;
+        }
+        Ok(())
+    }
+}
+
+impl IntoIterator for ChunkManager {
+    type Item = ChunkInfo;
+    type IntoIter = std::vec::IntoIter<ChunkInfo>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.chunks.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a ChunkManager {
+    type Item = &'a ChunkInfo;
+    type IntoIter = std::slice::Iter<'a, ChunkInfo>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.chunks.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut ChunkManager {
+    type Item = &'a mut ChunkInfo;
+    type IntoIter = std::slice::IterMut<'a, ChunkInfo>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.chunks.iter_mut()
+    }
 }

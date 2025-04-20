@@ -45,6 +45,7 @@
 ---
 
 # Getting Started
+
 This sections provides a quick overview of the functionality offered by WaveRs to help you get started quickly. WaveRs allows the user to read, write and perform conversions between different types of sampled audio, currently, ``i16``, ``i32``, ``f32`` and ``f64``. There is now **experimental** support for``i24`` now.
 
 For more details on the project and wav files see the [WaveRs Project](#the-wavers-project) section below. For more detailed information on the functionality offered by WaveRs see the [the docs](https://docs.rs/wavers).
@@ -147,12 +148,14 @@ fn main() {
 
 Check out [wav_inspect](https://crates.io/crates/wav_inspect) for a simnple command line tool to inspect the headers of wav files.
 
+
 ## Features
+
 The following section describes the features available in the WaveRs crate. 
 
 ### Ndarray
-The ``ndarray`` feature is used to provide functions that allow wav files to be read as ``ndarray`` 2-D arrays (samples x channels). There are two functions provided, ``into_ndarray`` and ``as_ndarray``. Both functions create an ``Array2`` from the samples and return it alongside the sample rate of the audio. ``into_ndarray`` consume the input ``Wav`` struct and ``as_ndarray`` does not.
 
+The ``ndarray`` feature is used to provide functions that allow wav files to be read as ``ndarray`` 2-D arrays (samples x channels). There are two functions provided, ``into_ndarray`` and ``as_ndarray``. Both functions create an ``Array2`` from the samples and return it alongside the sample rate of the audio. ``into_ndarray`` consume the input ``Wav`` struct and ``as_ndarray`` does not.
 
 ```rust
 use wavers::{read, Wav, AsNdarray, IntoNdarray};
@@ -181,9 +184,10 @@ There were several motivating factors when deciding to write Wavers. Firstly, my
 
 Rust also has a limited number of audio-processing libraries and even fewer specific to the wav format. Currently, the most popular wav reader/writer crate is [hound](https://github.com/ruuda/hound), by ruuda. Hound is currently used as the **wav file reader/writer** for other Rust audio libraries such as [Rodio](https://github.com/RustAudio/rodio), **but Hound was last updated in September 2022**. The biggest **general-purpose audio-processing** library for Rust though is [CPAL](https://github.com/rustaudio/cpal). CPAL, the Cross-Platform Audio Library is a low-level library for audio input and output in pure Rust. Finally, there is also [Symphonia](https://github.com/pdeljanov/Symphonia), another general-purpose media encoder/decoder crate for Rust. Symphonia supports the reading and writing of wav files.  Both ``CPAL`` and ``Symphonia`` are very low level and do not offer the ease of use that ``WaveRs`` strives for.
 
-## Project Goals
+# Project Goals
 
 ## Anatomy of Wav File
+
 The wave file format is a widely supported format for storing digital audio. A wave file uses the Resource Interchange File Format (RIFF) file structure and organizes the data in the file in chunks. Each chunk contains information about its type and size and can easily be skipped by software that does not understand the specific chunk type.
 
 Excluding the RIFF chunk there is no guaranteed order to the remaining chunks and only the fmt and data chunk are guaranteed to exist. This means that rather than a specific structure for decoding chunks, chunks must be discovered by seeking through the wav file and reading the chunk ID and chunk size fields. Then if the chunk is needed, read the chunk according to the chunk format, and if not, skip ahead by the size of the chunk. 
@@ -191,6 +195,7 @@ Excluding the RIFF chunk there is no guaranteed order to the remaining chunks an
 The chunk types supported and used by Wavers are described below. There are plans to expand the number of supported chunks as time goes on and the library matures.
 
 ## <u>RIFF</u>  
+
 Total Bytes = 8 + 4 for the Chunk name + the size of the rest of the file less 8 bytes for the Chunk ID and size.
 
 | Byte Sequence Description | Length(Bytes) | Offset(Bytes) | Description |
@@ -201,6 +206,7 @@ Total Bytes = 8 + 4 for the Chunk name + the size of the rest of the file less 8
 | Chunks | $x$ |  12 | The other chunks |
 
 ## <u>fmt </u> 
+
 Total bytes = 16 + 4 for the chunk size + 4 for the chunk name
 
 | Byte Sequence Description | Length(Bytes) | Offset(Bytes) | Description |
@@ -225,14 +231,16 @@ Total bytes = 4 for the chunk name + 4 for the size and then $x$ bytes for the d
 | data | $x$ | 8 | The encoded audio data |
 
 # Benchmarks
+
 The benchmarks below were recorded using ``Criterion`` and each benchmark was run on a small dataset of wav files taken from the GenSpeech data set. The durations vary between approx. 7s and 15s and each file is encoded as PCM_16. The results below are the time taken to load all the wav files in the data set. So the time per file is the total time divided by the number of files in the data set. The data set contains 10 files. There are some suspected anomalies in the benchmarks which warrant further investigation. The benchmarks were run on a desktop PC with the following (relevant) specs: 
 
 - CPU: 13th Gen Intel® Core™ i7-13700KF
 - RAM: 32Gb DDR4
 - Storage: 1Tb SSD
 
-
+<!-- 
 ## Hound vs Wavers - native i16
+
 | benchmark                    | name       | min_time   | mean_time   | max_time   |
 |:-----------------------------|:-----------|:-----------|:------------|:-----------|
 | Hound vs Wavers - native i16 | Hound Read i16   | 7.4417 ms  | 7.4441 ms   | 7.4466 ms  |
@@ -254,4 +262,4 @@ The benchmarks below were recorded using ``Criterion`` and each benchmark was ru
 | Writing     | Slice - Native i16        | 5.9484 ms  | 6.2091 ms   | 6.5018 ms  |
 | Writing     | Slice - Native i16 As f32 | 30.271 ms  | 33.773 ms   | 37.509 ms  |
 | Writing     | Write native f32          | 11.286 ms  | 11.948 ms   | 12.648 ms  |
-
+ -->

@@ -118,13 +118,11 @@ Enable with the `ndarray` feature.
 
 ```rust
 #[cfg(feature = "ndarray")]
-use wavers::AsNdarray;
-#[cfg(feature = "ndarray")]
 use ndarray::Array2;
 
 fn main() -> wavers::WaversResult<()> {
     let wav = wavers::Wav::from_path("audio/input.wav")?;
-    let (samples, rate): (Array2<i16>, u32) = wav.as_ndarray()?;
+    let (samples, rate): (Array2<i16>, u32) = wav.read_ndarray()?;
     println!("Shape: {:?}", samples.shape());
     Ok(())
 }

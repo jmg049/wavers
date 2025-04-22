@@ -1,6 +1,30 @@
-use std::io::{SeekFrom};
-use crate::{chunks::DATA, wav::{alloc_sample_buffer, Wav}, ReadSeek, WaversErrorKind, WaversResult};
+//! Iterators over WAV data: frames, channels, and blocks.
+//!
+//! This module defines iterator types for structured access to WAV file content,
+//! such as frame-wise, channel-wise, or overlapping block access.
+//!
+//! Each iterator is built on top of the `Wav` struct and provides a convenient,
+//! allocation-safe way to walk through audio samples. These iterators also account
+//! for interleaved data layout and allow consistent zero-padding or tail-discarding
+//! strategies when data is shorter than requested block sizes.
+//!
+//! All iterators require the target sample type `T` to implement [`AudioSample`],
+//! and conversions are handled internally via the `audio_sample` crate.
+//!
+//! # Provided iterators
+//!
+//! - [`FrameIterator`] – yields one multi-channel frame at a time
+//! - [`ChannelIterator`] – yields one channel's samples in sequence
+//! - [`BlockIterator`] – yields blocks (with optional overlap and zero-padding)
+//!
+//! Use the [`WavIterators`] extension trait for easy access to all iterator types.
+
+
+use crate::{
+    chunks::DATA, error::{OperationError, ParseError}, wav::{alloc_sample_buffer, Wav}, ReadSeek, WaversErrorKind, WaversResult
+};
 use audio_sample::{AudioSample, ConvertTo, Samples, I24};
+use std::io::SeekFrom;
 
 /// A frame iterator for the Wav struct.
 ///
@@ -168,14 +192,13 @@ where
         }
 
         // Seek to the start of the data chunk
-        self.wav.to_data().unwrap(); // SAFETY: DATA chunk is guaranteed to exist by this point
+        self.wav.to_data(); // SAFETY: DATA chunk is guaranteed to exist by this point
 
         // Seek to the start of the current channel
         match self.wav.seek_by_samples(self.current_channel as u64) {
             Ok(_) => (),
             Err(e) => return Some(Err(e)),
         }
-
         // Allocate buffer for channel samples
         let mut channel_samples = alloc_sample_buffer(self.n_samples_per_channel);
 
@@ -191,7 +214,7 @@ where
             if self.n_channels > 1 {
                 match self.wav.seek_by_samples((self.n_channels - 1) as u64) {
                     Ok(_) => (),
-                    Err(e) => {
+                    Err(_) => {
                         // If we hit an error seeking, we've likely reached the end of the file
                         break;
                     }
@@ -208,9 +231,9 @@ where
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TailHandling {
     /// Discard any incomplete hop that does not fill a full frame.
-    Discard,          
+    Discard,
     /// Zero‑pad the final (or single) frame to full length.
-    Pad,              
+    Pad,
 }
 
 impl Default for TailHandling {
@@ -227,18 +250,18 @@ where
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
 {
-    wav:            &'a mut Wav<R>,
-    block_size:     usize,         // in frames
-    overlap:        usize,         // in frames
-    hop_len:        usize,         // block_size - overlap  (in frames)
-    n_channels:     usize,
-    total_blocks:   usize,
-    current_block:  usize,
-    tail:           TailHandling,
-    center:         bool,
-    pad:            usize,         // frame_len/2 when center=true, otherwise 0
-    samples_total:  usize,         // total samples in file (all channels)
-    _phantom:       std::marker::PhantomData<T>,
+    wav: &'a mut Wav<R>,
+    block_size: usize, // in frames
+    _overlap: usize,    // in frames
+    hop_len: usize,    // block_size - overlap  (in frames)
+    n_channels: usize,
+    total_blocks: usize,
+    current_block: usize,
+    tail: TailHandling,
+    center: bool,
+    pad: usize,           // frame_len/2 when center=true, otherwise 0
+    samples_total: usize, // total samples in file (all channels)
+    _phantom: std::marker::PhantomData<T>,
 }
 
 impl<'a, R: ReadSeek, T: AudioSample> BlockIterator<'a, R, T>
@@ -250,46 +273,41 @@ where
     f64: ConvertTo<T>,
 {
     pub fn new(
-        wav:        &'a mut Wav<R>,
+        wav: &'a mut Wav<R>,
         block_size: usize,
-        overlap:    usize,
-        tail:       Option<TailHandling>,
-        center:     Option<bool>,
+        overlap: usize,
+        tail: Option<TailHandling>,
+        center: Option<bool>,
     ) -> WaversResult<Self> {
         if block_size == 0 {
-            return Err(WaversErrorKind::InvalidOp(
-                "Block size must be strictly positive".into(),
+            return Err(WaversErrorKind::Operation(OperationError::InvalidOp {
+                reason: "Block size must be strictly positive".into()}
             ));
         }
         if overlap >= block_size {
-            return Err(WaversErrorKind::InvalidOp(
-                "Overlap must be smaller than block size".into(),
+            return Err(WaversErrorKind::Operation(OperationError::InvalidOp {
+                reason: "Overlap must be smaller than block size".into()}
             ));
         }
 
-        let fmt       = wav.fmt_chunk();
-        let n_channels= fmt.channels as usize;
-        let bytes_ps  = fmt.bytes_per_sample() as usize;
+        let fmt = wav.fmt_chunk();
+        let n_channels = fmt.channels as usize;
+        let bytes_ps = fmt.bytes_per_sample() as usize;
 
-        let data_chunk= wav.chunk_info
-                          .get_chunk_info(&DATA)
-                          .ok_or(WaversErrorKind::ChunkNotFound(DATA))?;
+        let data_chunk = wav
+            .chunk_info
+            .get_chunk_info(&DATA)
+            .ok_or(WaversErrorKind::Parse(ParseError::ChunkNotFound{id: DATA}))?;
         let samples_total = data_chunk.size as usize / bytes_ps;
 
-        let tail   = tail.unwrap_or_default();
+        let tail = tail.unwrap_or_default();
         let center = center.unwrap_or(false);
-        let total_blocks = Self::calculate_blocks(
-            samples_total,
-            block_size,
-            overlap,
-            tail,
-            center,
-        );
+        let total_blocks = Self::calculate_blocks(samples_total, block_size, overlap, tail, center);
 
         Ok(Self {
             wav,
             block_size,
-            overlap,
+            _overlap: overlap,
             hop_len: block_size - overlap,
             n_channels,
             total_blocks,
@@ -303,16 +321,16 @@ where
     }
 
     pub fn calculate_blocks(
-        signal_len: usize,   
-        frame_len:  usize,   
-        overlap:    usize,
-        _tail:      TailHandling,
-        center:     bool,
+        signal_len: usize,
+        frame_len: usize,
+        overlap: usize,
+        _tail: TailHandling,
+        center: bool,
     ) -> usize {
         assert!(frame_len > 0 && overlap < frame_len);
 
         let hop_len = frame_len - overlap;
-        let pad     = if center { frame_len / 2 } else { 0 };
+        let pad = if center { frame_len / 2 } else { 0 };
 
         // When the signal is shorter than one frame (after optional padding)
         // still return exactly one frame.
@@ -351,8 +369,7 @@ where
         // librosa’s `center=True` shifts every frame by -pad half‑frames.
         let pos_frames = match self.center {
             false => self.current_block * self.hop_len,
-            true  => self.current_block * self.hop_len
-                     .saturating_sub(self.pad), // may under‑flow on the first frames
+            true => self.current_block * self.hop_len.saturating_sub(self.pad), // may under‑flow on the first frames
         };
 
         let start_sample = pos_frames * self.n_channels;
@@ -364,20 +381,23 @@ where
             frame_samples
         } else {
             // There will be at least some real samples.
-            if let Err(e) = self.wav.to_data().and_then(|_| {
-                self.wav.seek_by_samples(start_sample as u64)
-            }) {
-                self.current_block = self.total_blocks;      // abort future calls
-                return Some(Err(e));
+            self.wav.to_data();
+            match self.wav.seek_by_samples(start_sample as u64) {
+                Ok(_) => (),
+                Err(e) => {
+                    // If we hit an error seeking, we've likely reached the end of the file
+                    self.current_block = self.total_blocks; // abort future calls
+                    return Some(Err(e));
+                }
             }
             0
         };
 
         // Read as many real samples as we can get for this frame.
-        let remaining_in_file =
-            self.samples_total.saturating_sub(start_sample);
-        let max_real = frame_samples.saturating_sub(leading_zeros)
-                                    .min(remaining_in_file);
+        let remaining_in_file = self.samples_total.saturating_sub(start_sample);
+        let max_real = frame_samples
+            .saturating_sub(leading_zeros)
+            .min(remaining_in_file);
 
         let mut frame = match self.wav.read_samples(max_real) {
             Ok(samples) => samples,
@@ -387,7 +407,6 @@ where
             }
         };
 
-        // ─── pad or truncate according to TailHandling 
         let real_len = leading_zeros + frame.len();
         if real_len < frame_samples {
             match self.tail {
@@ -397,10 +416,7 @@ where
                     let mut padded = Vec::<T>::with_capacity(frame_samples);
                     padded.extend(std::iter::repeat(T::zero()).take(leading_zeros));
                     padded.append(&mut frame.to_vec());
-                    padded.extend(
-                        std::iter::repeat(T::zero())
-                            .take(frame_samples - padded.len()),
-                    );
+                    padded.extend(std::iter::repeat(T::zero()).take(frame_samples - padded.len()));
                     frame = Samples::from(padded.into_boxed_slice());
                 }
                 TailHandling::Discard => {
@@ -427,7 +443,6 @@ where
         Some(Ok(frame))
     }
 }
-
 
 /// Extension trait for the Wav struct to provide iterator methods
 pub trait WavIterators<R: ReadSeek> {
@@ -534,7 +549,7 @@ pub trait WavIterators<R: ReadSeek> {
     /// # Returns
     ///
     /// Ok(()) if successful, or an error
-    fn seek_relative(&mut self, offset: i64) -> WaversResult<()>;
+    fn seek_relative(&mut self, offset: i64) -> WaversResult<u64>;
 }
 
 impl<R: ReadSeek> WavIterators<R> for Wav<R> {
@@ -576,12 +591,12 @@ impl<R: ReadSeek> WavIterators<R> for Wav<R> {
     }
 
     /// Returns the current position in the reader.
-    /// 
+    ///
     /// SAFETY: The  underlying reader.stream_position(), which is really reader.seek(SeekFrom::Curnent(0)) call can only fail if:
-    /// 
+    ///
     /// From the std::io::Seek trait documentation:
     /// "Seeking can fail, for example because it might involve flushing a buffer." - Wavers does not flush the buffer, so this is not a concern.
-    /// "Seeking to a negative offset is considered an error." - Wavers does not allow negative offsets, so this is not a concern. 
+    /// "Seeking to a negative offset is considered an error." - Wavers does not allow negative offsets, so this is not a concern.
     /// This is enforced early by the type system. Probably not compilable if this is not the case.
     fn current_pos(&mut self) -> u64 {
         self.reader.stream_position().unwrap_or(0)
@@ -605,17 +620,26 @@ impl<R: ReadSeek> WavIterators<R> for Wav<R> {
         // Get bytes per sample from the WAV type
         let bytes_per_sample = self.wav_type.n_bytes() as u64;
         let offset = samples * bytes_per_sample;
+        
+        let current_pos = self.current_pos();
+
+        
+        if current_pos + offset > self.max_data_pos() {
+            return Err(WaversErrorKind::Operation(OperationError::InvalidOp {
+                reason: "Offset exceeds maximum data position".into(),
+            }));
+        }
 
         match self.reader.seek(std::io::SeekFrom::Current(offset as i64)) {
             Ok(_) => Ok(()),
-            Err(e) => Err(WaversErrorKind::IOErrorKind(e)),
+            Err(e) => Err(WaversErrorKind::Io(e)),
         }
     }
 
-    fn seek_relative(&mut self, offset: i64) -> WaversResult<()> {
-        match self.reader.seek(std::io::SeekFrom::Current(offset)) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(WaversErrorKind::IOErrorKind(e)),
+    fn seek_relative(&mut self, offset: i64) -> WaversResult<u64> {
+        match self.reader.seek(SeekFrom::Current(offset)) {
+            Ok(pos) => Ok(pos),
+            Err(e) => Err(WaversErrorKind::Io(e)),
         }
     }
 }
@@ -625,6 +649,7 @@ mod tests {
     use super::*;
     use crate::{chunks::DATA, wav::Wav};
     use audio_sample::AudioSample;
+    use crate::iter::WavIterators;
     use std::fs::File;
     use std::io::BufReader;
     use std::path::Path;
@@ -667,7 +692,8 @@ mod tests {
             );
 
             // Test that position is reset after iteration
-            let current_pos = wav.current_pos() + ((expected_channels * std::mem::size_of::<i16>()) as u64); // should be data chunk start + 4 since we read two 2 byte samples
+            let current_pos =
+                wav.current_pos() + ((expected_channels * std::mem::size_of::<i16>()) as u64); // should be data chunk start + 4 since we read two 2 byte samples
             let expected_pos = wav.chunk_info.get_chunk_info(&DATA).unwrap().offset + 8;
             assert_eq!(
                 current_pos, expected_pos as u64,
@@ -694,7 +720,6 @@ mod tests {
                 "Should iterate over {} channels",
                 expected_channels
             );
-
         }
     }
 
@@ -731,7 +756,8 @@ mod tests {
                     total_samples,
                     block_size,
                     overlap,
-                    TailHandling::Pad, true
+                    TailHandling::Pad,
+                    true,
                 );
 
             assert_eq!(
@@ -739,7 +765,6 @@ mod tests {
                 "Should iterate over {} blocks",
                 expected_blocks
             );
-
         }
     }
 
@@ -748,28 +773,28 @@ mod tests {
         use super::{BlockIterator, TailHandling};
         use std::fs::File;
         use std::io::BufReader;
-    
+
         #[test]
         fn test_calculate_blocks() {
             let blocks = BlockIterator::<BufReader<File>, i16>::calculate_blocks(
-                1000,            // signal length (samples)
-                100,             // frame / block size
-                0,               // overlap
+                1000, // signal length (samples)
+                100,  // frame / block size
+                0,    // overlap
                 TailHandling::Pad,
                 /*center=*/ false,
             );
             assert_eq!(blocks, 10, "Should yield 10 blocks with no overlap");
-    
+
             let blocks = BlockIterator::<BufReader<File>, i16>::calculate_blocks(
-                1000,            // signal length
+                1000, // signal length
                 100,
-                50,              // 50 % overlap
+                50, // 50 % overlap
                 TailHandling::Pad,
                 false,
             );
             assert_eq!(blocks, 19, "Should yield 19 blocks with 50 % overlap");
-    
-            let samples_per_channel = 1000;      // 2000 interleaved samples total
+
+            let samples_per_channel = 1000; // 2000 interleaved samples total
             let blocks = BlockIterator::<BufReader<File>, i16>::calculate_blocks(
                 samples_per_channel,
                 100,
@@ -790,7 +815,7 @@ mod tests {
                 "1050‑sample signal should yield 10 full‑length blocks"
             );
             let blocks = BlockIterator::<BufReader<File>, i16>::calculate_blocks(
-                50,              // shorter than frame_len
+                50, // shorter than frame_len
                 100,
                 0,
                 TailHandling::Pad,
@@ -802,5 +827,4 @@ mod tests {
             );
         }
     }
-   
 }

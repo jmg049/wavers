@@ -1,14 +1,24 @@
+//! Types and conversions related to WAV sample types.
+
 use crate::{FormatCode, WaversErrorKind};
 use audio_sample::I24;
 use std::any::TypeId;
 use std::fmt::{Display, Formatter};
 
+/// Number of bytes in a 16‑bit PCM sample.
 pub(crate) const PCM_16_BYTES: usize = std::mem::size_of::<i16>();
-pub(crate) const PCM_24_BYTES: usize = std::mem::size_of::<I24>() - 1; // -1 since i24 is 3 bytes, but internally it is an i32
+/// Number of bytes in a 24‑bit PCM sample.
+pub(crate) const PCM_24_BYTES: usize = std::mem::size_of::<I24>() - 1; // I24 is stored as i32 but only uses 3 bytes.
+/// Number of bytes in a 32‑bit PCM sample.
 pub(crate) const PCM_32_BYTES: usize = std::mem::size_of::<i32>();
+/// Number of bytes in a 32‑bit float sample.
 pub(crate) const FLOAT_32_BYTES: usize = std::mem::size_of::<f32>();
+/// Number of bytes in a 64‑bit float sample.
 pub(crate) const FLOAT_64_BYTES: usize = std::mem::size_of::<f64>();
 
+/// Set of valid sample bit depths for supported formats.
+///
+/// Used for validating WAV headers and mapping bit depths to types.
 #[repr(u16)]
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum ValidBitSize {
@@ -21,50 +31,48 @@ pub enum ValidBitSize {
 impl TryFrom<u16> for ValidBitSize {
     type Error = WaversErrorKind;
 
+    /// Attempts to convert a raw bit depth into a supported [`ValidBitSize`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WaversErrorKind::Validate`] if the value does not map
+    /// to a supported bit depth.
     fn try_from(value: u16) -> Result<Self, Self::Error> {
         match value {
             16 => Ok(ValidBitSize::Bits16),
             24 => Ok(ValidBitSize::Bits24),
             32 => Ok(ValidBitSize::Bits32),
             64 => Ok(ValidBitSize::Bits64),
-            _ => Err(WaversErrorKind::InvalidBitSize(value)),
+            _ => Err(WaversErrorKind::Validate(
+                crate::error::ValidationError::BitDepth {
+                    bits: value,
+                    format: FormatCode::Unknown, // FormatCode not known in this context
+                },
+            )),
         }
     }
 }
 
-/// Enum representing the encoding of a WAV file.
+/// Enum representing all supported WAV encodings.
 ///
-/// This enum distinguishes between standard WAV formats and extended formats
-/// (those using the WAVE_FORMAT_EXTENSIBLE format code). It covers the common
-/// PCM integer formats (16, 24, and 32 bit) as well as IEEE floating point
-/// formats (32 and 64 bit).
+/// Includes standard and extensible format variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WavType {
-    /// 16-bit signed PCM format (standard)
     Pcm16,
-    /// 24-bit signed PCM format (standard)
     Pcm24,
-    /// 32-bit signed PCM format (standard)
     Pcm32,
-    /// 32-bit IEEE floating point format (standard)
     Float32,
-    /// 64-bit IEEE floating point format (standard)
     Float64,
-    /// 16-bit signed PCM format (extensible)
     EPcm16,
-    /// 24-bit signed PCM format (extensible)
     EPcm24,
-    /// 32-bit signed PCM format (extensible)
     EPcm32,
-    /// 32-bit IEEE floating point format (extensible)
     EFloat32,
-    /// 64-bit IEEE floating point format (extensible)
     EFloat64,
     Unknown,
 }
 
 impl WavType {
-    /// Converts a tuple of format codes and bits per sample to a WavType.
+    /// Maps format triplets (format tag, bit size, subformat) into a [`WavType`].
     pub const fn format_info_to_wav_type(info: (FormatCode, ValidBitSize, FormatCode)) -> WavType {
         match info {
             (FormatCode::WavFormatPcm, ValidBitSize::Bits16, FormatCode::WavFormatPcm) => {
@@ -109,198 +117,171 @@ impl WavType {
         }
     }
 
-    /// Converts the WavType to the number of bytes per sample.
-    ///
-    /// # Returns
-    ///
-    /// The number of bytes used by each sample of this format
+    /// Returns the number of bytes per sample.
     pub const fn n_bytes(&self) -> usize {
         match self {
-            WavType::Pcm16 | WavType::EPcm16 => PCM_16_BYTES,
-            WavType::Pcm24 | WavType::EPcm24 => PCM_24_BYTES,
-            WavType::Pcm32 | WavType::EPcm32 => PCM_32_BYTES,
-            WavType::Float32 | WavType::EFloat32 => FLOAT_32_BYTES,
-            WavType::Float64 | WavType::EFloat64 => FLOAT_64_BYTES,
-            WavType::Unknown => 0,
+            Self::Pcm16 | Self::EPcm16 => PCM_16_BYTES,
+            Self::Pcm24 | Self::EPcm24 => PCM_24_BYTES,
+            Self::Pcm32 | Self::EPcm32 => PCM_32_BYTES,
+            Self::Float32 | Self::EFloat32 => FLOAT_32_BYTES,
+            Self::Float64 | Self::EFloat64 => FLOAT_64_BYTES,
+            Self::Unknown => 0,
         }
     }
 
-    /// Converts the WavType to the number of bits per sample.
-    ///
-    /// # Returns
-    ///
-    /// The number of bits used by each sample of this format
+    /// Returns the number of bits per sample.
     pub const fn n_bits(&self) -> usize {
         self.n_bytes() * 8
     }
 
-    /// Checks if this format is PCM (integer) audio.
-    ///
-    /// # Returns
-    ///
-    /// `true` if this is a PCM format, `false` for floating point
+    /// Returns true if this format is integer PCM.
     pub const fn is_pcm(&self) -> bool {
         matches!(
             self,
-            WavType::Pcm16
-                | WavType::Pcm24
-                | WavType::Pcm32
-                | WavType::EPcm16
-                | WavType::EPcm24
-                | WavType::EPcm32
+            Self::Pcm16 | Self::Pcm24 | Self::Pcm32 | Self::EPcm16 | Self::EPcm24 | Self::EPcm32
         )
     }
 
-    /// Checks if this format is IEEE floating point audio.
-    ///
-    /// # Returns
-    ///
-    /// `true` if this is a floating point format, `false` for PCM
+    /// Returns true if this format is IEEE floating point.
     pub const fn is_float(&self) -> bool {
         matches!(
             self,
-            WavType::Float32 | WavType::Float64 | WavType::EFloat32 | WavType::EFloat64
+            Self::Float32 | Self::Float64 | Self::EFloat32 | Self::EFloat64
         )
     }
 
-    /// Checks if this format uses the extensible wave format.
-    ///
-    /// # Returns
-    ///
-    /// `true` if this is an extensible format, `false` for standard format
+    /// Returns true if this format is based on the extensible WAV format.
     pub const fn is_extensible(&self) -> bool {
         matches!(
             self,
-            WavType::EPcm16
-                | WavType::EPcm24
-                | WavType::EPcm32
-                | WavType::EFloat32
-                | WavType::EFloat64
+            Self::EPcm16 | Self::EPcm24 | Self::EPcm32 | Self::EFloat32 | Self::EFloat64
         )
     }
 
-    /// Gets the corresponding standard format for an extensible format.
-    ///
-    /// If this is already a standard format, it returns itself.
+    /// Converts an extensible format into its standard equivalent.
     ///
     /// # Returns
     ///
-    /// The equivalent standard format
+    /// The standard variant if one exists, else the original value.
     pub const fn to_standard(&self) -> Self {
         match self {
-            WavType::EPcm16 => WavType::Pcm16,
-            WavType::EPcm24 => WavType::Pcm24,
-            WavType::EPcm32 => WavType::Pcm32,
-            WavType::EFloat32 => WavType::Float32,
-            WavType::EFloat64 => WavType::Float64,
-            _ => *self, // Already a standard format
+            Self::EPcm16 => Self::Pcm16,
+            Self::EPcm24 => Self::Pcm24,
+            Self::EPcm32 => Self::Pcm32,
+            Self::EFloat32 => Self::Float32,
+            Self::EFloat64 => Self::Float64,
+            _ => *self,
         }
     }
 
-    /// Gets the corresponding extensible format for a standard format.
-    ///
-    /// If this is already an extensible format, it returns itself.
+    /// Converts a standard format into its extensible equivalent.
     ///
     /// # Returns
     ///
-    /// The equivalent extensible format
+    /// The extensible variant if one exists, else the original value.
     pub const fn to_extensible(&self) -> Self {
         match self {
-            WavType::Pcm16 => WavType::EPcm16,
-            WavType::Pcm24 => WavType::EPcm24,
-            WavType::Pcm32 => WavType::EPcm32,
-            WavType::Float32 => WavType::EFloat32,
-            WavType::Float64 => WavType::EFloat64,
-            _ => *self, // Already an extensible format
+            Self::Pcm16 => Self::EPcm16,
+            Self::Pcm24 => Self::EPcm24,
+            Self::Pcm32 => Self::EPcm32,
+            Self::Float32 => Self::EFloat32,
+            Self::Float64 => Self::EFloat64,
+            _ => *self,
         }
     }
 
-    /// Creates a WavType from its components.
+    /// Creates a WavType from audio characteristics.
     ///
     /// # Arguments
     ///
-    /// * `is_pcm` - Whether this is PCM (true) or floating point (false)
-    /// * `bit_depth` - The bit depth (16, 24, 32 for PCM; 32, 64 for float)
-    /// * `is_extensible` - Whether this uses the extensible format
-    ///
-    /// # Returns
-    ///
-    /// The corresponding WavType, or None if the combination is invalid
+    /// * `is_pcm` – whether the format is PCM
+    /// * `bit_depth` – expected bit depth
+    /// * `is_extensible` – whether the format uses extensible encoding
     pub fn from_components(is_pcm: bool, bit_depth: usize, is_extensible: bool) -> Self {
         match (is_pcm, bit_depth, is_extensible) {
-            (true, 16, false) => WavType::Pcm16,
-            (true, 24, false) => WavType::Pcm24,
-            (true, 32, false) => WavType::Pcm32,
-            (false, 32, false) => WavType::Float32,
-            (false, 64, false) => WavType::Float64,
-            (true, 16, true) => WavType::EPcm16,
-            (true, 24, true) => WavType::EPcm24,
-            (true, 32, true) => WavType::EPcm32,
-            (false, 32, true) => WavType::EFloat32,
-            (false, 64, true) => WavType::EFloat64,
-            _ => WavType::Unknown, // Invalid combination
+            (true, 16, false) => Self::Pcm16,
+            (true, 24, false) => Self::Pcm24,
+            (true, 32, false) => Self::Pcm32,
+            (false, 32, false) => Self::Float32,
+            (false, 64, false) => Self::Float64,
+            (true, 16, true) => Self::EPcm16,
+            (true, 24, true) => Self::EPcm24,
+            (true, 32, true) => Self::EPcm32,
+            (false, 32, true) => Self::EFloat32,
+            (false, 64, true) => Self::EFloat64,
+            _ => Self::Unknown,
         }
     }
 
-    /// Gets the maximum valid sample value for PCM formats.
+    /// Returns the maximum valid sample value for the format.
     ///
-    /// # Returns
-    ///
-    /// The maximum sample value as f64, or 1.0 for floating point formats
+    /// For float formats, returns `1.0`.
     pub fn max_value(&self) -> f64 {
         match self {
-            WavType::Pcm16 | WavType::EPcm16 => 32767.0, // 2^15 - 1
-            WavType::Pcm24 | WavType::EPcm24 => 8_388_607.0, // 2^23 - 1
-            WavType::Pcm32 | WavType::EPcm32 => 2_147_483_647.0, // 2^31 - 1
-            WavType::Float32 | WavType::EFloat32 => 1.0,
-            WavType::Float64 | WavType::EFloat64 => 1.0,
-            WavType::Unknown => 0.0,
+            Self::Pcm16 | Self::EPcm16 => 32767.0,
+            Self::Pcm24 | Self::EPcm24 => 8_388_607.0,
+            Self::Pcm32 | Self::EPcm32 => 2_147_483_647.0,
+            Self::Float32 | Self::EFloat32 => 1.0,
+            Self::Float64 | Self::EFloat64 => 1.0,
+            Self::Unknown => 0.0,
         }
     }
 
-    /// Gets the minimum valid sample value for PCM formats.
+    /// Returns the minimum valid sample value for the format.
     ///
-    /// # Returns
-    ///
-    /// The minimum sample value as f64, or -1.0 for floating point formats
+    /// For float formats, returns `-1.0`.
     pub fn min_value(&self) -> f64 {
         match self {
-            WavType::Pcm16 | WavType::EPcm16 => -32768.0, // -2^15
-            WavType::Pcm24 | WavType::EPcm24 => -8_388_608.0, // -2^23
-            WavType::Pcm32 | WavType::EPcm32 => -2_147_483_648.0, // -2^31
-            WavType::Float32 | WavType::EFloat32 => -1.0,
-            WavType::Float64 | WavType::EFloat64 => -1.0,
-            WavType::Unknown => 0.0,
+            Self::Pcm16 | Self::EPcm16 => -32768.0,
+            Self::Pcm24 | Self::EPcm24 => -8_388_608.0,
+            Self::Pcm32 | Self::EPcm32 => -2_147_483_648.0,
+            Self::Float32 | Self::EFloat32 => -1.0,
+            Self::Float64 | Self::EFloat64 => -1.0,
+            Self::Unknown => 0.0,
         }
     }
 }
 
 impl Display for WavType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            WavType::Pcm16 => writeln!(f, "PCM_16"),
-            WavType::Pcm24 => writeln!(f, "PCM_24"),
-            WavType::Pcm32 => writeln!(f, "PCM_32"),
-            WavType::Float32 => writeln!(f, "IEEE_FLOAT_32"),
-            WavType::Float64 => writeln!(f, "IEEE_FLOAT_64"),
-            WavType::EPcm16 => writeln!(f, "EXTENSIBLE_PCM_16"),
-            WavType::EPcm24 => writeln!(f, "EXTENSIBLE_PCM_24"),
-            WavType::EPcm32 => writeln!(f, "EXTENSIBLE_PCM_32"),
-            WavType::EFloat32 => writeln!(f, "EXTENSIBLE_IEEE_FLOAT_32"),
-            WavType::EFloat64 => writeln!(f, "EXTENSIBLE_IEEE_FLOAT_64"),
-            WavType::Unknown => writeln!(f, "Unknown"),
-        }
+        use WavType::*;
+        write!(
+            f,
+            "{}",
+            match self {
+                Pcm16 => "PCM_16",
+                Pcm24 => "PCM_24",
+                Pcm32 => "PCM_32",
+                Float32 => "IEEE_FLOAT_32",
+                Float64 => "IEEE_FLOAT_64",
+                EPcm16 => "EXTENSIBLE_PCM_16",
+                EPcm24 => "EXTENSIBLE_PCM_24",
+                EPcm32 => "EXTENSIBLE_PCM_32",
+                EFloat32 => "EXTENSIBLE_IEEE_FLOAT_32",
+                EFloat64 => "EXTENSIBLE_IEEE_FLOAT_64",
+                Unknown => "Unknown",
+            }
+        )
     }
 }
+
 impl From<TypeId> for WavType {
+    /// Converts from a Rust [`TypeId`] to a corresponding [`WavType`].
+    ///
+    /// Used primarily in conversions and type-driven dispatch.
     fn from(value: TypeId) -> Self {
-        match value {
-            x if x == TypeId::of::<i16>() => WavType::Pcm16,
-            x if x == TypeId::of::<I24>() => WavType::Pcm24,
-            x if x == TypeId::of::<i32>() => WavType::Pcm32,
-            x if x == TypeId::of::<f32>() => WavType::Float32, // Stuck with this for now instead of EFloat since a lot of players do no support the extensible format
-            x if x == TypeId::of::<f64>() => WavType::Float64,
-            _ => WavType::Unknown,
+        if value == TypeId::of::<i16>() {
+            Self::Pcm16
+        } else if value == TypeId::of::<I24>() {
+            Self::Pcm24
+        } else if value == TypeId::of::<i32>() {
+            Self::Pcm32
+        } else if value == TypeId::of::<f32>() {
+            Self::Float32
+        } else if value == TypeId::of::<f64>() {
+            Self::Float64
+        } else {
+            Self::Unknown
         }
     }
 }

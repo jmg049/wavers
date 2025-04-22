@@ -8,20 +8,20 @@ To compile the WAV benchmark program, you'll need to have the following dependen
 
 ## Installing Dependencies
 
-### On Debian/Ubuntu:
+### On Debian/Ubuntu
 
 ```bash
 sudo apt-get update
 sudo apt-get install build-essential libsndfile1-dev
 ```
 
-### On macOS (using Homebrew):
+### On macOS (using Homebrew)
 
 ```bash
 brew install libsndfile
 ```
 
-### On Fedora/RHEL:
+### On Fedora/RHEL
 
 ```bash
 sudo dnf install gcc libsndfile-devel

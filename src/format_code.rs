@@ -1,29 +1,55 @@
+//! Definitions and utilities for WAV format tags.
+
 use std::fmt::Display;
 
-/// An enum representing some of the format codes in the wav file format.
+/// An enumeration of known format codes used in the WAV file specification.
+///
+/// Format codes identify the encoding used for audio data in the `fmt` chunk.
+/// These include both legacy and modern extensible representations.
+///
+/// Unknown or unsupported codes will be mapped to [`FormatCode::Unknown`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum FormatCode {
+    /// PCM (Pulse-code modulation), standard uncompressed integer format.
     WavFormatPcm = 0x0001,
+
+    /// IEEE 32-bit or 64-bit floating point audio.
     WavFormatIeeeFloat = 0x0003,
+
+    /// A-law encoding (companded 8-bit), rare in WAV files.
     WaveFormatAlaw = 0x0006,
+
+    /// μ-law encoding (companded 8-bit), also rare.
     WaveFormatMulaw = 0x0007,
+
+    /// Extended format which defers actual encoding to a subformat GUID.
+    ///
+    /// Used in conjunction with a subformat field inside the `fmt` chunk.
     WaveFormatExtensible = 0xFFFE,
+
+    /// Placeholder for unrecognised or unsupported format codes.
     Unknown = 0x0000,
 }
 
 impl FormatCode {
-    /// Convert the format code to a native endian byte array.
+    /// Returns the format code as native-endian bytes.
+    ///
+    /// Useful when writing binary WAV headers using the system’s endian layout.
     pub const fn to_ne_bytes(self) -> [u8; 2] {
         (self as u16).to_ne_bytes()
     }
 
-    /// Convert the format code to a little endian byte array
+    /// Returns the format code as little-endian bytes.
+    ///
+    /// WAV files are usually encoded in little-endian format regardless of platform.
     pub const fn to_le_bytes(self) -> [u8; 2] {
         (self as u16).to_le_bytes()
     }
 
-    /// Convert the format code to a big endian byte array.
+    /// Returns the format code as big-endian bytes.
+    ///
+    /// This is only necessary in rare cases involving custom formats or testing.
     pub const fn to_be_bytes(self) -> [u8; 2] {
         (self as u16).to_be_bytes()
     }

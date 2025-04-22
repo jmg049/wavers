@@ -3,19 +3,23 @@ name = "wavers"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+doctest = false
+
 [dependencies]
 memmap2 = "0.9.5"
 thiserror = "2.0.12"
-i24 = { git="https://www.github.com/jmg049/i24.git" }
-audio_sample = { path = "../audio_sample", features = ["visualization"] }
+i24 = { path="../i24" }
+audio_sample = { path = "../audio_sample",  features = ["visualization"], default-features = false }
 nom = "8.0.0"
 colored = { version = "3.0.0", optional = true }
 term_size = "0.3.2"
 num-traits = "0.2.19"
-
-[features]
-default = ["colored_output"]  # Default features - colored output not included by default
-colored_output = ["dep:colored"]  # Feature that enables colored output
+ndarray = { version = "0.16.1", optional = true }
+log = { version = "0.4.22", optional = true }
+rubato = { version = "0.15.0", optional = true }
+numpy = {version = "0.24.0", optional = true }
+pyo3 = {version = "0.24.1", optional = true }
 
 [dev-dependencies]
 hound = "3.5.1"
@@ -27,3 +31,13 @@ codegen-units = 1
 opt-level = 3
 panic = "abort"
 strip = true
+
+[features]
+default = ["colored_output"]  # Default features - colored output not included by default
+colored_output = ["dep:colored"]  # Feature that enables colored output
+ndarray = ["dep:ndarray", "audio_sample/ndarray"]
+colored = ["dep:colored"]
+log = ["dep:log"]
+resampling = ["dep:rubato"]
+pyo3 = ["dep:pyo3", "dep:numpy", "dep:ndarray", "i24/pyo3"]
+

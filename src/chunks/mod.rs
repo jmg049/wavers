@@ -1,18 +1,28 @@
-use crate::{WaversErrorKind, WaversResult};
+//! Chunk parsing and metadata helpers for RIFF/WAV formats.
+//!
+//! This module defines the fundamental building blocks for working with WAV files,
+//! including chunk identifiers, descriptors, and a container for managing chunk metadata.
+//!
+//! WAV files (a form of RIFF files) are composed of ordered "chunks", each prefixed
+//! with an identifier and size field. This module provides:
+//!
+//! - Constants for known and supported chunk identifiers ([`RIFF`], [`FMT`], [`DATA`], etc).
+//! - The [`Chunk`] and [`ChunkInfo`] structures for in-memory chunk access.
+//! - The [`ChunkManager`] which tracks metadata for all discovered chunks.
+//! - [`validate_tag`] and related helpers to ensure correctness when parsing.
+
+
+use crate::{error::{OperationError, ValidationError}, WaversErrorKind, WaversResult};
 use std::{
     fmt::{Debug, Display},
     ops::Deref,
 };
 
-/// Module containing the data chunk implementation
-pub(crate) mod data;
-/// Module containing the format chunk implementation
 pub(crate) mod fmt;
 
 pub(crate) mod riff;
 
 pub(crate) use riff::RIFFChunk;
-
 
 /// Standard RIFF chunk identifier
 pub const RIFF: ChunkID = ChunkID::new(*b"RIFF");
@@ -31,6 +41,8 @@ pub const INFO: ChunkID = ChunkID::new(*b"INFO");
 /// Peak chunk identifier
 pub const PEAK: ChunkID = ChunkID::new(*b"PEAK");
 
+
+/// Returns `Ok(())` if the tag is one of the known WAV/RIFF chunk types.
 pub const fn validate_tag(tag: ChunkID) -> WaversResult<()> {
     if chunk_eq(tag.id, RIFF.id) {
         return Ok(());
@@ -64,7 +76,7 @@ pub const fn validate_tag(tag: ChunkID) -> WaversResult<()> {
         return Ok(());
     }
 
-    Err(WaversErrorKind::InvalidChunkType)
+    Err(WaversErrorKind::Validate(ValidationError::UnsupportedChunk { id: tag}))
 }
 
 /// A WAV file chunk, consisting of an identifier, size, and data
@@ -419,8 +431,9 @@ impl ChunkManager {
 
     pub fn get_start(&self) -> WaversResult<usize> {
         if self.is_empty() {
-            return Err(WaversErrorKind::InvalidOp(
-                "Called get_start on empty chunk manager.".to_string(),
+            return Err(WaversErrorKind::Operation(OperationError::InvalidOp{
+                reason : "Called get_start on empty chunk manager.".to_string(),
+            }
             ));
         }
         Ok(self.get_chunk_info(&RIFF).unwrap().offset)
@@ -428,9 +441,9 @@ impl ChunkManager {
 
     pub fn get_end(&self) -> WaversResult<usize> {
         if self.is_empty() {
-            return Err(WaversErrorKind::InvalidOp(
-                "Called get_end on empty chunk manager.".to_string(),
-            ));
+            return Err(WaversErrorKind::Operation(OperationError::InvalidOp {
+                reason: "Called get_end on empty chunk manager.".to_string()
+            }));
         }
         Ok(self
             .chunks

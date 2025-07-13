@@ -29,7 +29,6 @@ pub enum Domain {
     Validate,
     Convert,
     Operation,
-    #[cfg(feature = "ndarray")]
     Sample,
     Internal,
 }
@@ -62,7 +61,6 @@ pub enum Code {
     BadIndex,
     IllegalState,
     InvalidOp,
-    #[cfg(feature = "ndarray")]
     SampleError,
 
     InternalBug,
@@ -86,9 +84,8 @@ pub enum WaversErrorKind {
     #[error(transparent)]
     Operation(#[from] OperationError),
 
-    #[cfg(feature = "ndarray")]
     #[error("Audio Sample Error: {0}")]
-    SampleError(#[from] audio_sample::AudioSampleError),
+    SampleError(#[from] audio_samples::AudioSampleError),
 
     #[error(transparent)]
     Internal(#[from] InternalError),
@@ -105,7 +102,6 @@ impl WaversErrorKind {
             Validate(_) => Domain::Validate,
             Convert(_) => Domain::Convert,
             Operation(_) => Domain::Operation,
-            #[cfg(feature = "ndarray")]
             SampleError(_) => Domain::Sample,
             Internal(_) => Domain::Internal,
         }
@@ -121,7 +117,6 @@ impl WaversErrorKind {
             Validate(e) => e.code(),
             Convert(e) => e.code(),
             Operation(e) => e.code(),
-            #[cfg(feature = "ndarray")]
             SampleError(_) => Code::SampleError,
             Internal(_) => Code::InternalBug,
         }

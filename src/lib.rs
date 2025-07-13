@@ -62,39 +62,66 @@
 //!
 //! ## Usage Examples
 //!
-//! ### Reading a WAV File
+//! ### Reading a WAV File (Recommended)
 //!
-//! Read WAV file samples easily:
+//! Read WAV file as AudioSamples with rich metadata and processing capabilities:
+//!
+//! ```no_run
+//! use wavers::read_audio;
+//!
+//! fn main() -> wavers::WaversResult<()> {
+//!     let audio = read_audio::<f32>("audio/input.wav")?;
+//!     
+//!     println!("Sample Rate: {} Hz", audio.sample_rate());
+//!     println!("Channels: {}", audio.channels());
+//!     println!("Duration: {:.2} seconds", audio.duration_seconds());
+//!     
+//!     // Rich audio analysis
+//!     let rms = audio.rms();
+//!     let peak = audio.peak();
+//!     println!("RMS: {:.4}, Peak: {:.4}", rms, peak);
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ### Reading as Raw Samples (Legacy)
+//!
+//! For compatibility with existing code:
 //!
 //! ```no_run
 //! use wavers::read;
-//! use audio_sample::Samples;
 //!
 //! fn main() -> wavers::WaversResult<()> {
-//!     let path = "audio/input.wav";
-//!     let (samples, sample_rate, channels): (Samples<i16>, u32, u16) = read(path)?;
+//!     let (samples, sample_rate, channels): (Box<[i16]>, u32, u16) = read("audio/input.wav")?;
 //!     println!("Sample Rate: {}, Channels: {}", sample_rate, channels);
-//!     println!("First sample: {:?}", samples.get(0));
+//!     println!("First sample: {:?}", samples.first());
 //!     Ok(())
 //! }
 //! ```
 //!
 //! ---
 //!
-//! ### Converting Audio Samples
+//! ### Converting and Processing Audio
 //!
-//! Convert audio samples effortlessly between formats:
+//! AudioSamples supports rich type conversions and processing:
 //!
 //! ```no_run
-//! use wavers::read;
-//! use audio_sample::{Samples, ConvertSequence};
+//! use wavers::read_audio;
+//! use audio_samples::AudioTypeConversion;
 //!
 //! fn main() -> wavers::WaversResult<()> {
-//!     let path = "audio/input_i16.wav";
-//!     let (samples_i16, sample_rate, channels): (Samples<i16>, u32, u16) = read(path)?;
-//!     // Convert i16 samples to f32
-//!     let samples_f32: Samples<f32> = samples_i16.convert_sequence();
-//!     println!("Converted first sample: {:?}", samples_f32.get(0));
+//!     // Read as 16-bit integer
+//!     let audio_i16 = read_audio::<i16>("audio/input.wav")?;
+//!     
+//!     // Convert to 32-bit float for processing
+//!     let audio_f32 = audio_i16.convert_to_sample_type::<f32>()?;
+//!     
+//!     // Apply audio processing
+//!     let processed = audio_f32
+//!         .remove_dc_offset()?
+//!         .normalize(-1.0, 1.0, audio_samples::NormalizationMethod::Peak)?;
+//!     
+//!     println!("Processed audio: {} samples", processed.total_samples());
 //!     Ok(())
 //! }
 //! ```
@@ -103,51 +130,80 @@
 //!
 //! ### Writing WAV Files
 //!
-//! Quickly write samples to a WAV file:
+//! Write AudioSamples directly to WAV files:
 //!
 //! ```no_run
-//! use wavers::{write, read};
-//! use audio_sample::{Samples, ConvertSequence};
+//! use wavers::{read_audio, write_ndarray};
+//! use audio_samples::AudioTypeConversion;
 //!
 //! fn main() -> wavers::WaversResult<()> {
-//!     let input_path = "audio/input.wav";
-//!     let output_path = "audio/output.wav";
-//!
-//!     let (samples, sample_rate, channels): (Samples<f32>, u32, u16) = read(input_path)?;
-//!     // Optionally convert samples to a different type
-//!     let samples_i16: Samples<i16> = samples.convert_sequence();
-//!
-//!     // Write to file
-//!     write(output_path, &samples_i16, sample_rate, Some(channels))?;
+//!     // Read and process audio
+//!     let mut audio = read_audio::<f32>("audio/input.wav")?;
+//!     
+//!     // Apply processing (modifies in place)
+//!     audio.normalize(-1.0, 1.0, audio_samples::NormalizationMethod::Peak)?;
+//!     audio.low_pass_filter(8000.0)?;
+//!     
+//!     // Convert to desired output format
+//!     let audio_i16 = audio.convert_to_sample_type::<i16>()?;
+//!     
+//!     // Extract ndarray for writing (current write API)
+//!     let array = if audio_i16.is_mono() {
+//!         audio_i16.as_mono().unwrap().insert_axis(ndarray::Axis(0))
+//!     } else {
+//!         audio_i16.as_multi_channel().unwrap().clone()
+//!     };
+//!     
+//!     write_ndarray("audio/output.wav", &array, audio_i16.sample_rate(), None)?;
 //!     Ok(())
 //! }
 //! ```
 //!
 //! ---
 //!
-//! ### Iterating Over WAV Data
+//! ### Advanced Audio Processing
 //!
-//! Conveniently iterate over frames and channels:
+//! AudioSamples provides comprehensive audio analysis capabilities:
 //!
 //! ```no_run
-//! use wavers::{Wav, read, WavIterators};
+//! use wavers::read_audio;
+//! use audio_samples::{AudioStatistics, AudioTransforms};
+//!
+//! fn main() -> wavers::WaversResult<()> {
+//!     let audio = read_audio::<f32>("audio/input.wav")?;
+//!     
+//!     // Statistical analysis
+//!     println!("RMS: {:.4}", audio.rms());
+//!     println!("Peak: {:.4}", audio.peak());
+//!     println!("Zero crossings: {}", audio.zero_crossings());
+//!     
+//!     // Spectral analysis
+//!     let centroid = audio.spectral_centroid()?;
+//!     println!("Spectral centroid: {:.2} Hz", centroid);
+//!     
+//!     // Advanced transforms
+//!     let mfcc = audio.mfcc(13, 128, 0.0, audio.sample_rate() as f64 / 2.0)?;
+//!     println!("MFCC shape: {:?}", mfcc.dim());
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ### Iterating Over WAV Data (Legacy)
+//!
+//! For frame and channel iteration:
+//!
+//! ```no_run
+//! use wavers::{Wav, WavIterators};
 //! use std::fs::File;
 //! use std::io::BufReader;
 //!
 //! fn main() -> wavers::WaversResult<()> {
-//!     let path = "audio/stereo.wav";
-//!     let mut wav = Wav::<BufReader<File>>::from_path(path)?;
+//!     let mut wav = Wav::<BufReader<File>>::from_path("audio/stereo.wav")?;
 //!
 //!     // Iterate over frames
 //!     for frame_result in wav.frames::<i16>() {
 //!         let frame = frame_result?;
 //!         println!("Frame has {} samples (one per channel)", frame.len());
-//!     }
-//!
-//!     // Iterate over channels separately
-//!     for channel_result in wav.channels::<i16>() {
-//!         let channel = channel_result?;
-//!         println!("Channel has {} samples", channel.len());
 //!     }
 //!     Ok(())
 //! }
@@ -313,9 +369,6 @@ pub mod iter;
 pub mod wav;
 pub mod wav_type;
 
-#[cfg(feature = "pyo3")]
-pub mod py;
-
 /// Struct representing the `fmt` chunk and related funtionality.
 pub use crate::chunks::fmt::FmtChunk;
 /// Commonly used chunk identifiers.
@@ -341,13 +394,9 @@ use std::{
     path::Path,
 };
 
-use audio_sample::{AudioSample, ConvertTo, I24, Samples};
-
-#[cfg(feature = "ndarray")]
+use audio_samples::{AudioSample, AudioSamples, ConvertTo, I24};
 use ndarray::Array2;
 
-#[cfg(not(feature = "ndarray"))]
-use std::any::TypeId;
 
 
 /// Trait alias for types that implement both [Read] and [Seek].
@@ -367,7 +416,6 @@ impl<T: Read + Seek> ReadSeek for T {}
 /// - `Box<[T]>`: Decoded audio samples.
 /// - `u32`: Sample rate in Hz.
 /// - `u16`: Number of channels.
-#[cfg(not(feature = "ndarray"))]
 pub fn read_with<T: AudioSample, R: ReadSeek>(reader: R) -> WaversResult<(Box<[T]>, u32, u16)>
 where
     i16: ConvertTo<T>,
@@ -393,7 +441,6 @@ where
 ///
 /// # Returns
 /// Same as [`read_with`].
-#[cfg(not(feature = "ndarray"))]
 pub fn read<P: AsRef<Path>, T: AudioSample>(path: P) -> WaversResult<(Box<[T]>, u32, u16)>
 where
     i16: ConvertTo<T>,
@@ -407,15 +454,17 @@ where
     read_with::<T, _>(buf_reader)
 }
 
-/// Reads a WAV file from a reader and returns audio as an [Array2<T>] and sample rate (Hz).
+/// Reads a WAV file from a reader and returns an ndarray, sample rate, and number of channels.
 ///
-/// Requires the `ndarray` feature.
+/// # Type Parameters  
+/// - `T`: Output sample type implementing [AudioSample].
+/// - `R`: Input reader implementing [Read] + [Seek].
 ///
 /// # Returns
-/// - [Array2<T>]: Channels × Samples matrix of decoded audio.
-/// - `u32`: Sample rate.
-#[cfg(feature = "ndarray")]
-pub fn read_with<T: AudioSample, R: ReadSeek>(reader: R) -> WaversResult<(Array2<T>, u32)>
+/// Tuple containing:
+/// - `Array2<T>`: 2D array with shape (channels, samples).
+/// - `u32`: Sample rate in Hz.
+pub fn read_with_ndarray<T: AudioSample, R: ReadSeek>(reader: R) -> WaversResult<(Array2<T>, u32)>
 where
     i16: ConvertTo<T>,
     I24: ConvertTo<T>,
@@ -423,16 +472,22 @@ where
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
 {
-    let mut wav = Wav::from_reader(reader)?;
-    let (samples, sr) = wav.read_ndarray::<T>()?;
-    Ok((samples, sr as u32))
+    use ndarray::Array2;
+    let (samples, sample_rate, channels) = read_with::<T, R>(reader)?;
+    let num_samples = samples.len() / channels as usize;
+    let array = Array2::from_shape_vec((channels as usize, num_samples), samples.into_vec())
+        .map_err(|e| WaversErrorKind::Internal(InternalError::Bug(format!("Failed to create ndarray: {}", e))))?;
+    Ok((array, sample_rate))
 }
 
-/// Reads a WAV file from the file system into an `Array2<T>` with sample rate.
+/// Reads a WAV file from the file system and returns an ndarray, sample rate.
 ///
-/// Requires the `ndarray` feature.
-#[cfg(feature = "ndarray")]
-pub fn read<P: AsRef<Path>, T: AudioSample>(path: P) -> WaversResult<(Array2<T>, u32)>
+/// # Arguments
+/// - `path`: Path to the WAV file.
+///
+/// # Returns
+/// Same as [`read_with_ndarray`].
+pub fn read_ndarray<P: AsRef<Path>, T: AudioSample>(path: P) -> WaversResult<(Array2<T>, u32)>
 where
     i16: ConvertTo<T>,
     I24: ConvertTo<T>,
@@ -442,7 +497,90 @@ where
 {
     let file = std::fs::File::open(path)?;
     let buf_reader = BufReader::new(file);
-    read_with::<T, _>(buf_reader)
+    read_with_ndarray::<T, _>(buf_reader)
+}
+
+/// Reads a WAV file from a reader and returns AudioSamples with metadata.
+///
+/// This is the recommended way to read audio data as it provides rich metadata
+/// and access to audio processing operations from the audio_samples crate.
+///
+/// # Type Parameters  
+/// - `T`: Output sample type implementing [AudioSample].
+/// - `R`: Input reader implementing [Read] + [Seek].
+///
+/// # Returns
+/// [AudioSamples] instance containing the audio data with metadata.
+///
+/// # Example
+/// ```rust,no_run
+/// use wavers::read_audio_with;
+/// use std::fs::File;
+/// use std::io::BufReader;
+///
+/// fn main() -> wavers::WaversResult<()> {
+///     let file = File::open("audio.wav")?;
+///     let reader = BufReader::new(file);
+///     let audio = read_audio_with::<f32, _>(reader)?;
+///     
+///     println!("Sample rate: {} Hz", audio.sample_rate());
+///     println!("Channels: {}", audio.channels());
+///     println!("Duration: {:.2} seconds", audio.duration_seconds());
+///     Ok(())
+/// }
+/// ```
+pub fn read_audio_with<T: AudioSample, R: ReadSeek>(reader: R) -> WaversResult<AudioSamples<T>>
+where
+    i16: ConvertTo<T>,
+    I24: ConvertTo<T>,
+    i32: ConvertTo<T>,
+    f32: ConvertTo<T>,
+    f64: ConvertTo<T>,
+{
+    let mut wav = Wav::from_reader(reader)?;
+    wav.to_audio_samples()
+}
+
+/// Reads a WAV file from the file system and returns AudioSamples with metadata.
+///
+/// This is the recommended way to read audio data as it provides rich metadata
+/// and access to audio processing operations from the audio_samples crate.
+///
+/// # Arguments
+/// - `path`: Path to the WAV file.
+///
+/// # Returns
+/// [AudioSamples] instance containing the audio data with metadata.
+///
+/// # Example
+/// ```rust,no_run
+/// use wavers::read_audio;
+///
+/// fn main() -> wavers::WaversResult<()> {
+///     let audio = read_audio::<f32>("audio.wav")?;
+///     
+///     println!("Sample rate: {} Hz", audio.sample_rate());
+///     println!("Channels: {}", audio.channels());
+///     println!("Duration: {:.2} seconds", audio.duration_seconds());
+///     
+///     // Access rich audio processing capabilities
+///     let rms = audio.rms();
+///     let peak = audio.peak();
+///     println!("RMS: {:.4}, Peak: {:.4}", rms, peak);
+///     Ok(())
+/// }
+/// ```
+pub fn read_audio<T: AudioSample, P: AsRef<Path>>(path: P) -> WaversResult<AudioSamples<T>>
+where
+    i16: ConvertTo<T>,
+    I24: ConvertTo<T>,
+    i32: ConvertTo<T>,
+    f32: ConvertTo<T>,
+    f64: ConvertTo<T>,
+{
+    let file = std::fs::File::open(path)?;
+    let buf_reader = BufReader::new(file);
+    read_audio_with::<T, _>(buf_reader)
 }
 
 /// Writes a slice of samples to a WAV writer with a given sample rate and optional channel count.
@@ -509,7 +647,6 @@ where
 /// - `samples`: Boxed slice of input samples.
 /// - `sr`: Sample rate (Hz).
 /// - `channels`: Optional number of channels.
-#[cfg(not(feature = "ndarray"))]
 pub fn write<P: AsRef<Path>, T: AudioSample>(
     path: P,
     samples: &Box<[T]>,
@@ -527,18 +664,21 @@ where
     let file = File::create(path)?;
     let writer = BufWriter::new(file);
 
-    let bytes = converted_samples.into_bytes();
+    let bytes = T::to_bytes_slice(samples);
 
     let wav_type = WavType::from(TypeId::of::<T>());
 
     crate::write_with(writer, &bytes, wav_type, sr, channels)
 }
 
-/// Writes an `ndarray::Array2` of audio samples to a WAV file.
+/// Writes audio samples from an ndarray to a WAV file.
 ///
-/// Requires the `ndarray` feature.
-#[cfg(feature = "ndarray")]
-pub fn write<P: AsRef<Path>, T: AudioSample>(
+/// # Arguments
+/// - `path`: File path to write to.
+/// - `samples`: 2D ndarray with shape (channels, samples).
+/// - `sr`: Sample rate (Hz).
+/// - `channels`: Optional number of channels (inferred from array shape if None).
+pub fn write_ndarray<P: AsRef<Path>, T: AudioSample>(
     path: P,
     samples: &Array2<T>,
     sr: u32,
@@ -551,13 +691,20 @@ where
     f32: ConvertTo<T>,
     f64: ConvertTo<T>,
 {
-    let file = File::create(path)?;
-    let writer = BufWriter::new(file);
-
-    let samples = samples.as_bytes();
-
-    let wav_type = WavType::from(TypeId::of::<T>());
-    crate::write_with::<BufWriter<File>, T>(writer, &samples, wav_type, sr, channels)
+    
+    let (num_channels, num_samples) = samples.dim();
+    let channels = channels.unwrap_or(num_channels as u16);
+    
+    // Convert to interleaved format
+    let mut interleaved = Vec::with_capacity(num_channels * num_samples);
+    for sample_idx in 0..num_samples {
+        for channel_idx in 0..num_channels {
+            interleaved.push(samples[(channel_idx, sample_idx)]);
+        }
+    }
+    
+    let boxed_samples = interleaved.into_boxed_slice();
+    crate::write(path, &boxed_samples, sr, Some(channels))
 }
 
 /// Returns WAV file metadata without loading the full sample data.
@@ -574,6 +721,7 @@ pub fn info<P: AsRef<Path>>(path: P) -> WaversResult<WavInfo> {
 #[cfg(test)]
 pub(crate) mod wav_api_tests {
     use super::*;
+    use audio_samples::AudioStatistics;
     use std::fs::File;
     use std::io::BufReader;
     use std::path::Path;
@@ -619,7 +767,6 @@ pub(crate) mod wav_api_tests {
         assert!((info.duration - exp_dur).abs() < 1e-6, "duration");
     }
 
-    #[cfg(not(feature = "ndarray"))]
     #[test]
     fn test_read_with() {
         // exercise the free `read_with(reader)` taking a BufReader
@@ -636,19 +783,114 @@ pub(crate) mod wav_api_tests {
         assert_eq!(channels, 1, "channels");
     }
 
-    #[cfg(feature = "ndarray")]
     #[test]
-    fn test_read_with() {
-        // exercise the free `read_with(reader)` taking a BufReader
+    fn test_read_audio_with() {
+        // Test the new read_audio_with function
         let f = File::open(ONE_CHANNEL_WAV_I16).expect("open file");
         let reader = BufReader::new(f);
-        let (samples, sample_rate) = read_with::<i16, _>(reader).expect("read_with failed");
+        let audio = read_audio_with::<f32, _>(reader).expect("read_audio_with failed");
+        
+        // Verify metadata
+        assert_eq!(audio.sample_rate(), 16000, "sample rate");
+        assert_eq!(audio.channels(), 1, "channels");
+        assert!(audio.is_mono(), "should be mono");
+        
+        // Verify sample count matches expected
         let expected = expected_i16();
-        assert_eq!(samples.len(), expected.len(), "length mismatch");
-        // check last sample matches
-        let last = samples.len() - 1;
-        assert_eq!(*samples.last().unwrap(), expected[last], "last sample");
-        assert_eq!(sample_rate, 16000, "sample rate");
-        assert_eq!(samples.shape()[0], 1, "channels");
+        assert_eq!(audio.samples_per_channel(), expected.len(), "sample count");
+        
+        // Test that we can access audio processing methods
+        let rms = audio.rms();
+        let peak = audio.peak();
+        assert!(rms > 0.0, "RMS should be positive");
+        assert!(peak > 0.0, "Peak should be positive");
+    }
+
+    #[test]  
+    fn test_read_audio() {
+        // Test the new read_audio function
+        let audio = read_audio::<i16, _>(ONE_CHANNEL_WAV_I16).expect("read_audio failed");
+        
+        // Verify metadata matches what we expect
+        assert_eq!(audio.sample_rate(), 16000, "sample rate");
+        assert_eq!(audio.channels(), 1, "channels");
+        assert_eq!(audio.duration_seconds(), 10.0, "duration");
+        
+        // Verify sample data accuracy by comparing with expected data
+        let expected = expected_i16();
+        assert_eq!(audio.samples_per_channel(), expected.len(), "sample count");
+        
+        if let Some(mono_array) = audio.as_mono() {
+            for (i, (&actual, &expected)) in mono_array.iter().zip(expected.iter()).enumerate() {
+                assert_eq!(actual, expected, "sample mismatch at index {}", i);
+            }
+        } else {
+            panic!("Expected mono audio");
+        }
+    }
+
+    #[test]
+    fn test_read_audio_statistics() {
+        // Test that AudioSamples provides statistical methods
+        let audio = read_audio::<f32, _>(ONE_CHANNEL_WAV_I16).expect("read_audio failed");
+        
+        // Test basic statistics
+        let rms = audio.rms();
+        let peak = audio.peak();
+        let min = audio.min_native();
+        let max = audio.max_native();
+        
+        assert!(rms > 0.0 && rms <= 1.0, "RMS should be reasonable: {}", rms);
+        assert!(peak > 0.0 && peak <= 1.0, "Peak should be reasonable: {}", peak);
+        assert!(min >= -1.0, "Min should be >= -1.0: {}", min);
+        assert!(max <= 1.0, "Max should be <= 1.0: {}", max);
+        
+        // Test zero crossings
+        let crossings = audio.zero_crossings();
+        assert!(crossings > 0, "Should have some zero crossings: {}", crossings);
+        
+        let zcr = audio.zero_crossing_rate();
+        assert!(zcr > 0.0, "Zero crossing rate should be positive: {}", zcr);
+    }
+
+    #[test]
+    fn test_wav_read_audio_method() {
+        // Test the new Wav::read_audio method
+        let f = File::open(ONE_CHANNEL_WAV_I16).expect("open file");
+        let mut wav = crate::wav::Wav::from_reader(BufReader::new(f)).expect("from_reader");
+        
+        let audio = wav.read_audio::<f32>().expect("read_audio failed");
+        
+        // Verify it works the same as the free function
+        assert_eq!(audio.sample_rate(), 16000);
+        assert_eq!(audio.channels(), 1);
+        assert!(audio.is_mono());
+        
+        // Verify we can call it multiple times (caching should work)
+        let audio2 = wav.read_audio::<f32>().expect("read_audio failed second time");
+        assert_eq!(audio.sample_rate(), audio2.sample_rate());
+        assert_eq!(audio.total_samples(), audio2.total_samples());
+    }
+
+    #[test]
+    fn test_read_audio_different_types() {
+        // Test that we can read as different sample types
+        let audio_i16 = read_audio::<i16, _>(ONE_CHANNEL_WAV_I16).expect("read as i16");
+        let audio_i32 = read_audio::<i32, _>(ONE_CHANNEL_WAV_I16).expect("read as i32"); 
+        let audio_f32 = read_audio::<f32, _>(ONE_CHANNEL_WAV_I16).expect("read as f32");
+        let audio_f64 = read_audio::<f64, _>(ONE_CHANNEL_WAV_I16).expect("read as f64");
+        
+        // All should have same metadata
+        assert_eq!(audio_i16.sample_rate(), audio_i32.sample_rate());
+        assert_eq!(audio_i16.sample_rate(), audio_f32.sample_rate());
+        assert_eq!(audio_i16.sample_rate(), audio_f64.sample_rate());
+        
+        assert_eq!(audio_i16.channels(), audio_i32.channels());
+        assert_eq!(audio_i16.channels(), audio_f32.channels());
+        assert_eq!(audio_i16.channels(), audio_f64.channels());
+        
+        assert_eq!(audio_i16.samples_per_channel(), audio_i32.samples_per_channel());
+        assert_eq!(audio_i16.samples_per_channel(), audio_f32.samples_per_channel());
+        assert_eq!(audio_i16.samples_per_channel(), audio_f64.samples_per_channel());
     }
 }

@@ -1,7 +1,7 @@
 //! Types and conversions related to WAV sample types.
 
 use crate::{FormatCode, WaversErrorKind};
-use audio_sample::I24;
+use audio_samples::I24;
 use std::any::TypeId;
 use std::fmt::{Display, Formatter};
 

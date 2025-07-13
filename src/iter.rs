@@ -25,7 +25,7 @@ use crate::{
     wav::{alloc_sample_buffer, Wav},
     ReadSeek, WaversErrorKind, WaversResult,
 };
-use audio_sample::{AudioSample, ConvertTo, I24};
+use audio_samples::{AudioSample, ConvertTo, I24};
 use std::io::SeekFrom;
 
 /// A frame iterator for the Wav struct.
@@ -551,6 +551,27 @@ pub trait WavIterators<R: ReadSeek> {
     ///
     /// Ok(()) if successful, or an error
     fn seek_relative(&mut self, offset: i64) -> WaversResult<u64>;
+
+    /// Gets the complete audio data as AudioSamples
+    ///
+    /// This provides access to the rich AudioSamples API for advanced processing
+    /// while maintaining the option to use iterators for streaming access.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `T` - The audio sample type to convert to
+    ///
+    /// # Returns
+    ///
+    /// AudioSamples instance containing all audio data with metadata
+    fn as_audio_samples<T: AudioSample>(&mut self) -> WaversResult<audio_samples::AudioSamples<T>>
+    where
+        i16: ConvertTo<T>,
+        I24: ConvertTo<T>,
+        i32: ConvertTo<T>,
+        f32: ConvertTo<T>,
+        f64: ConvertTo<T>,
+        T: Clone + 'static;
 }
 
 impl<R: ReadSeek> WavIterators<R> for Wav<R> {
@@ -644,6 +665,18 @@ impl<R: ReadSeek> WavIterators<R> for Wav<R> {
             Err(e) => Err(WaversErrorKind::Io(e)),
         }
     }
+
+    fn as_audio_samples<T: AudioSample>(&mut self) -> WaversResult<audio_samples::AudioSamples<T>>
+    where
+        i16: ConvertTo<T>,
+        I24: ConvertTo<T>,
+        i32: ConvertTo<T>,
+        f32: ConvertTo<T>,
+        f64: ConvertTo<T>,
+        T: Clone + 'static,
+    {
+        self.to_audio_samples()
+    }
 }
 
 #[cfg(test)]
@@ -651,22 +684,22 @@ mod tests {
     use super::*;
     use crate::iter::WavIterators;
     use crate::{chunks::DATA, wav::Wav};
-    use audio_sample::AudioSample;
+    use audio_samples::{AudioSample, AudioStatistics};
     use std::fs::File;
     use std::io::BufReader;
     use std::path::Path;
 
-    // Constants for test files
+    // Constants for test filesclaude 
     const TWO_CHANNEL_WAV_I16: &str = "./test_resources/two_channel_i16.wav";
 
     // Helper function to create a wav for testing
     fn create_test_wav<T: AudioSample>(path: &str) -> Wav<BufReader<File>>
     where
-        i16: audio_sample::ConvertTo<T>,
-        audio_sample::I24: audio_sample::ConvertTo<T>,
-        i32: audio_sample::ConvertTo<T>,
-        f32: audio_sample::ConvertTo<T>,
-        f64: audio_sample::ConvertTo<T>,
+        i16: audio_samples::ConvertTo<T>,
+        audio_samples::I24: audio_samples::ConvertTo<T>,
+        i32: audio_samples::ConvertTo<T>,
+        f32: audio_samples::ConvertTo<T>,
+        f64: audio_samples::ConvertTo<T>,
     {
         let file = File::open(path).expect("Failed to open test file");
         let buf_reader = BufReader::new(file);
@@ -722,6 +755,27 @@ mod tests {
                 "Should iterate over {} channels",
                 expected_channels
             );
+        }
+    }
+
+    #[test]
+    fn test_as_audio_samples() {
+        if Path::new(TWO_CHANNEL_WAV_I16).exists() {
+            let mut wav = create_test_wav::<f32>(TWO_CHANNEL_WAV_I16);
+            
+            // Test the new as_audio_samples method
+            let audio = wav.as_audio_samples::<f32>().expect("Failed to get AudioSamples");
+            
+            // Verify it has the expected metadata
+            assert_eq!(audio.sample_rate(), 16000, "sample rate");
+            assert_eq!(audio.channels(), 2, "channels");
+            assert!(!audio.is_mono(), "should not be mono");
+            
+            // Test that we can use AudioSamples methods
+            let rms = audio.rms();
+            let peak = audio.peak();
+            assert!(rms > 0.0, "RMS should be positive");
+            assert!(peak > 0.0, "Peak should be positive");
         }
     }
 

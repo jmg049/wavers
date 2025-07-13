@@ -11,8 +11,8 @@
 //! 3. **[`WaversResult`]** – `core::result::Result` alias with the default error.  
 //! 4. Tiny helper methods like [`WaversErrorKind::domain`] and [`WaversErrorKind::code`].
 
-use thiserror::Error;
 use crate::{chunks::ChunkID, wav_type::WavType, FormatCode};
+use thiserror::Error;
 
 /// Crate‑wide result alias.
 pub type WaversResult<T, E = WaversErrorKind> = core::result::Result<T, E>;
@@ -104,7 +104,7 @@ impl WaversErrorKind {
             Parse(_) => Domain::Parse,
             Validate(_) => Domain::Validate,
             Convert(_) => Domain::Convert,
-            Operation(_) => Domain::Operation,  
+            Operation(_) => Domain::Operation,
             #[cfg(feature = "ndarray")]
             SampleError(_) => Domain::Sample,
             Internal(_) => Domain::Internal,
@@ -122,7 +122,7 @@ impl WaversErrorKind {
             Convert(e) => e.code(),
             Operation(e) => e.code(),
             #[cfg(feature = "ndarray")]
-            SampleError(e) =>Code::SampleError,
+            SampleError(_) => Code::SampleError,
             Internal(_) => Code::InternalBug,
         }
     }

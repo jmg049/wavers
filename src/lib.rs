@@ -26,8 +26,8 @@
 #![warn(clippy::missing_errors_doc)] // Docs for functions that return `Result`
 
 //! # Wavers
-//!
-//! **Wavers** is a fast, lightweight, and easy-to-use library for reading, writing, and manipulating WAV audio files in Rust.
+
+//! **Wavers** is a fast, lightweight, and easy-to-use library for reading and writing WAV audio files in Rust.
 //! It provides comprehensive support for audio sample types, efficient conversions, and convenient iterators over audio data.
 //!
 //! Feedback, feature requests, and bug reports are welcome!
@@ -39,7 +39,7 @@
 //! - **Efficient and Lightweight**: Designed for performance-critical applications with minimal overhead.
 //! - **Intuitive API**: Read, write, and manipulate WAV files with clear and concise functions.
 //! - **Wide Audio Format Support**: Handles various sample formats: `i16`, `i24`, `i32`, `f32`, and `f64`.
-//! - **Automatic Sample Conversion**: Built-in conversion between audio sample types, leveraging SIMD when available for maximum speed.
+//! - **Automatic Sample Conversion**: Built-in conversion between audio sample types via [audio_sample].
 //! - **Extended Format Support**: Supports the `WAVE_FORMAT_EXTENSIBLE` format, with detailed channel configurations.
 //! - **Flexible Iteration**: Efficient iteration over frames, channels, or blocks of audio data.
 //! - **Chunk Management**: Advanced support for managing various WAV file chunks.
@@ -54,7 +54,8 @@
 //!
 //! - **Stable Core API**: The core functionality is stable, with minimal breaking changes anticipated.
 //! - **Planned Enhancements**:
-//!   - Further optimization of the 'read' and `write` functions. Benchmarks have shown there is room for improvement.
+//!   - Further optimization of the [crate::read] and [crate::write] functions. Benchmarks have shown there is room for improvement.
+//!     Particularly for reading i24 samples and writing in general.
 //!  - Additional features and utilities based on user feedback.
 //!
 //! ---
@@ -177,7 +178,7 @@
 //! *(Enable with feature flag `ndarray`)*
 //!
 //! ```no_run
-//! 
+//!
 //! use wavers::{Wav, AsNdarray};
 //! use ndarray::Array2;
 //! use std::fs::File;
@@ -193,11 +194,11 @@
 //!
 //! ---
 //!
-//! ## Benchmarks & Performance
+//! # Benchmarks & Performance
 //!
 //! Full benchmarking results and comparisons against other crates are available on the project [GitHub](https://github.com/jmg049/wavers).
 //!
-//! # WAV Library Read and Write Benchmarks - libsndfile vs. Wavers vs. hound
+//! ## WAV Library Read and Write Benchmarks - libsndfile vs. Wavers vs. hound
 
 //! ## 1 Methodology in Brief
 
@@ -271,9 +272,8 @@
 //! * `libsndfile` achieves the highest sustained write throughput for larger files and offers the widest feature set.  
 //! * `hound` is efficient for short PCM‑16/32/F32 writes and has the lightest dependency footprint.
 
-
 //! The results show no single library is universally “best”; each one excels along different axes that matter in practice:
-//! 
+//!
 //! - **`wavers` (Rust)**  
 //!   Delivers the **lowest mean latency** across all short-file tests and many longer runs, with exceptionally **consistent standard deviation** (sub-microsecond jitter). While its write performance is typically within **10–15% of the fastest implementation** for integer PCM formats, it leads for **24-/32-bit writes**.  
 //!   - **Format support**: PCM‑16/24/32, IEEE‑F32/64  
@@ -300,7 +300,7 @@
 //!
 //! ---
 //!
-//! ## Additional Utilities
+//! # Additional Utilities
 //!
 //! For quick command-line inspection of WAV files, see [`wav_inspect`](https://crates.io/crates/wav_inspect).
 //!
@@ -310,35 +310,65 @@ pub mod chunks;
 pub mod error;
 pub mod format_code;
 pub mod iter;
-pub mod mmap_reader;
 pub mod wav;
 pub mod wav_type;
+
+#[cfg(feature = "pyo3")]
+pub mod py;
+
+/// Struct representing the `fmt` chunk and related funtionality.
+pub use crate::chunks::fmt::FmtChunk;
+/// Commonly used chunk identifiers.
 pub use crate::chunks::{DATA, FACT, FMT, INFO, LIST, RIFF, WAVE};
+/// General-purpose result and error kinds for the library.
+pub use crate::error::{
+    ConversionError, InternalError, OperationError, ParseError, ValidationError, WaversErrorKind,
+    WaversResult,
+};
+/// Enum of recognized WAV format codes.
+pub use crate::format_code::FormatCode;
+/// Iterator utilities for WAV samples.
 pub use crate::iter::WavIterators;
-use audio_sample::{AudioSample, ConvertSequence, ConvertTo, Samples, I24};
-use chunks::fmt::FmtChunk;
-use error::ValidationError;
-pub use error::{WaversErrorKind, WaversResult};
-pub use format_code::FormatCode;
-use std::any::{type_name, Any};
+/// Main representation of a WAV file and associated metadata.
+pub use crate::wav::{Wav, WavInfo};
+/// Enum for representing WAV sample type (bit depth + encoding).
+pub use crate::wav_type::WavType;
 
 use std::{
-    io::{BufReader, Read, Seek, Write},
+    any::TypeId,
+    fs::File,
+    io::{BufReader, BufWriter, Read, Seek, Write},
     path::Path,
 };
-pub use wav::{Wav, WavInfo};
-pub use wav_type::WavType;
 
+use audio_sample::{AudioSample, ConvertTo, I24, Samples};
+
+#[cfg(feature = "ndarray")]
+use ndarray::Array2;
+
+#[cfg(not(feature = "ndarray"))]
 use std::any::TypeId;
-use std::fs::File;
-use std::io::BufWriter;
 
+
+/// Trait alias for types that implement both [Read] and [Seek].
 pub trait ReadSeek: Read + Seek {}
 
 impl<T: Read + Seek> ReadSeek for T {}
 
-
-pub fn read_with<T: AudioSample, R: ReadSeek>(reader: R) -> WaversResult<(Samples<T>, u32, u16)>
+/// Reads a WAV file from a reader and returns raw audio samples,
+/// sample rate (Hz), and number of channels (for non-`ndarray` mode).
+///
+/// # Type Parameters
+/// - `T`: Output sample type implementing [AudioSample].
+/// - `R`: Input reader implementing [Read] + [Seek].
+///
+/// # Returns
+/// Tuple containing:
+/// - `Box<[T]>`: Decoded audio samples.
+/// - `u32`: Sample rate in Hz.
+/// - `u16`: Number of channels.
+#[cfg(not(feature = "ndarray"))]
+pub fn read_with<T: AudioSample, R: ReadSeek>(reader: R) -> WaversResult<(Box<[T]>, u32, u16)>
 where
     i16: ConvertTo<T>,
     I24: ConvertTo<T>,
@@ -351,11 +381,20 @@ where
     let channels = fmt_chunk.channels;
     let sample_rate = fmt_chunk.sample_rate as u32;
 
-    let samples = Samples::from(wav.read()?);
+    let samples = wav.read()?;
     Ok((samples, sample_rate, channels))
 }
 
-pub fn read<P: AsRef<Path>, T: AudioSample>(path: P) -> WaversResult<(Samples<T>, u32, u16)>
+/// Reads a WAV file from the file system and returns raw audio samples,
+/// sample rate, and number of channels (non-`ndarray` mode).
+///
+/// # Arguments
+/// - `path`: Path to the WAV file.
+///
+/// # Returns
+/// Same as [`read_with`].
+#[cfg(not(feature = "ndarray"))]
+pub fn read<P: AsRef<Path>, T: AudioSample>(path: P) -> WaversResult<(Box<[T]>, u32, u16)>
 where
     i16: ConvertTo<T>,
     I24: ConvertTo<T>,
@@ -368,74 +407,71 @@ where
     read_with::<T, _>(buf_reader)
 }
 
-pub fn write_with<W: Write,  T: AudioSample>(
+/// Reads a WAV file from a reader and returns audio as an [Array2<T>] and sample rate (Hz).
+///
+/// Requires the `ndarray` feature.
+///
+/// # Returns
+/// - [Array2<T>]: Channels × Samples matrix of decoded audio.
+/// - `u32`: Sample rate.
+#[cfg(feature = "ndarray")]
+pub fn read_with<T: AudioSample, R: ReadSeek>(reader: R) -> WaversResult<(Array2<T>, u32)>
+where
+    i16: ConvertTo<T>,
+    I24: ConvertTo<T>,
+    i32: ConvertTo<T>,
+    f32: ConvertTo<T>,
+    f64: ConvertTo<T>,
+{
+    let mut wav = Wav::from_reader(reader)?;
+    let (samples, sr) = wav.read_ndarray::<T>()?;
+    Ok((samples, sr as u32))
+}
+
+/// Reads a WAV file from the file system into an `Array2<T>` with sample rate.
+///
+/// Requires the `ndarray` feature.
+#[cfg(feature = "ndarray")]
+pub fn read<P: AsRef<Path>, T: AudioSample>(path: P) -> WaversResult<(Array2<T>, u32)>
+where
+    i16: ConvertTo<T>,
+    I24: ConvertTo<T>,
+    i32: ConvertTo<T>,
+    f32: ConvertTo<T>,
+    f64: ConvertTo<T>,
+{
+    let file = std::fs::File::open(path)?;
+    let buf_reader = BufReader::new(file);
+    read_with::<T, _>(buf_reader)
+}
+
+/// Writes a slice of samples to a WAV writer with a given sample rate and optional channel count.
+///
+/// # Type Parameters
+/// - `F`: Input sample type.
+/// - `T`: Target WAV storage sample type.
+///
+/// # Arguments
+/// - `writer`: Destination implementing `Write`.
+/// - `samples`: Slice of samples.
+/// - `sr`: Sample rate (Hz).
+/// - `channels`: Optional number of channels (defaults to 1).
+pub fn write_with<W: Write, To: AudioSample>(
     mut writer: W,
-    samples: &Samples<T>,
+    samples: &[u8], // must pass an owned reference
+    wav_type: WavType,
     sr: u32,
     channels: Option<u16>,
-) -> WaversResult<()> {
+) -> WaversResult<()>
+where
+    i16: ConvertTo<To>,
+    I24: ConvertTo<To>,
+    i32: ConvertTo<To>,
+    f32: ConvertTo<To>,
+    f64: ConvertTo<To>,
+{
     let channels = channels.unwrap_or(1);
-    // ———————————————————————————————————————————————————————————
-    // 1) Turn Samples<T> into a Vec<u8> *and* pick the final WavType
-    // ———————————————————————————————————————————————————————————
-    let (wav_type, data_bytes): (WavType, Vec<u8>) = {
-        let tid = TypeId::of::<T>();
 
-        if tid == TypeId::of::<i16>() {
-            let s: Samples<i16> = samples.as_sequence();
-            let byte_slice = unsafe {
-                std::slice::from_raw_parts(
-                    s.as_ptr() as *const u8,
-                    s.len() * std::mem::size_of::<i16>(),
-                )
-            };
-            (WavType::Pcm16, byte_slice.to_vec())
-        } else if tid == TypeId::of::<I24>() {
-            let s: Samples<I24> = samples.as_sequence();
-            let mut buf = Vec::with_capacity(s.len() * 3);
-            for &sample in s.as_ref() {
-                let b = sample.to_le_bytes(); // [u8;4], little‑endian
-                buf.extend_from_slice(&b[0..3]);
-            }
-            (WavType::Pcm24, buf)
-        } else if tid == TypeId::of::<i32>() {
-            let s: Samples<i32> = samples.as_sequence();
-            let byte_slice = unsafe {
-                std::slice::from_raw_parts(
-                    s.as_ptr() as *const u8,
-                    s.len() * std::mem::size_of::<i32>(),
-                )
-            };
-            (WavType::Pcm32, byte_slice.to_vec())
-        } else if tid == TypeId::of::<f32>() {
-            let s: Samples<f32> = samples.as_sequence();
-            let byte_slice = unsafe {
-                std::slice::from_raw_parts(
-                    s.as_ptr() as *const u8,
-                    s.len() * std::mem::size_of::<f32>(),
-                )
-            };
-            (WavType::Float32, byte_slice.to_vec())
-        } else if tid == TypeId::of::<f64>() {
-            let s: Samples<f64> = samples.as_sequence();
-            let byte_slice = unsafe {
-                std::slice::from_raw_parts(
-                    s.as_ptr() as *const u8,
-                    s.len() * std::mem::size_of::<f64>(),
-                )
-            };
-            (WavType::Float64, byte_slice.to_vec())
-        } else {
-            return Err(WaversErrorKind::Validate(ValidationError::InvalidTargetSampleType{
-                sample_type: type_name::<T>().to_string()
-            }
-            ));
-        }
-    };
-
-    // ———————————————————————————————————————————————————————————
-    // 2) Now that we know exactly what WavType we’re writing, build the fmt chunk
-    // ———————————————————————————————————————————————————————————
     let fmt_chunk = match wav_type {
         WavType::Pcm16 => FmtChunk::new_pcm(channels, sr as i32, 16),
         WavType::Pcm24 => FmtChunk::new_pcm(channels, sr as i32, 24),
@@ -447,12 +483,9 @@ pub fn write_with<W: Write,  T: AudioSample>(
 
     let fmt_bytes = fmt_chunk.to_bytes();
     let fmt_size = fmt_bytes.len() as u32;
-    let data_size = data_bytes.len() as u32;
+    let data_size = samples.len() as u32;
     let riff_size = 4 + 8 + fmt_size + 8 + data_size;
 
-    // ———————————————————————————————————————————————————————————
-    // 3) Emit RIFF header, fmt chunk, data chunk, then raw bytes
-    // ———————————————————————————————————————————————————————————
     writer.write_all(b"RIFF")?;
     writer.write_all(&riff_size.to_le_bytes())?;
     writer.write_all(b"WAVE")?;
@@ -463,30 +496,80 @@ pub fn write_with<W: Write,  T: AudioSample>(
 
     writer.write_all(b"data")?;
     writer.write_all(&data_size.to_le_bytes())?;
-    writer.write_all(&data_bytes)?;
+    writer.write_all(&samples)?;
 
     writer.flush()?;
     Ok(())
 }
 
+/// Writes audio samples to a WAV file from a boxed slice (non-`ndarray` mode).
+///
+/// # Arguments
+/// - `path`: File path to write to.
+/// - `samples`: Boxed slice of input samples.
+/// - `sr`: Sample rate (Hz).
+/// - `channels`: Optional number of channels.
+#[cfg(not(feature = "ndarray"))]
 pub fn write<P: AsRef<Path>, T: AudioSample>(
     path: P,
-    samples: &Samples<T>,
+    samples: &Box<[T]>,
     sr: u32,
     channels: Option<u16>,
-) -> WaversResult<()> {
+) -> WaversResult<()>
+where
+    i16: ConvertTo<T>,
+    I24: ConvertTo<T>,
+    i32: ConvertTo<T>,
+    f32: ConvertTo<T>,
+    f64: ConvertTo<T>,
+{
+
     let file = File::create(path)?;
     let writer = BufWriter::new(file);
-    crate::write_with(writer, samples, sr, channels)
+
+    let bytes = converted_samples.into_bytes();
+
+    let wav_type = WavType::from(TypeId::of::<T>());
+
+    crate::write_with(writer, &bytes, wav_type, sr, channels)
 }
 
+/// Writes an `ndarray::Array2` of audio samples to a WAV file.
+///
+/// Requires the `ndarray` feature.
+#[cfg(feature = "ndarray")]
+pub fn write<P: AsRef<Path>, T: AudioSample>(
+    path: P,
+    samples: &Array2<T>,
+    sr: u32,
+    channels: Option<u16>,
+) -> WaversResult<()>
+where
+    i16: ConvertTo<T>,
+    I24: ConvertTo<T>,
+    i32: ConvertTo<T>,
+    f32: ConvertTo<T>,
+    f64: ConvertTo<T>,
+{
+    let file = File::create(path)?;
+    let writer = BufWriter::new(file);
+
+    let samples = samples.as_bytes();
+
+    let wav_type = WavType::from(TypeId::of::<T>());
+    crate::write_with::<BufWriter<File>, T>(writer, &samples, wav_type, sr, channels)
+}
+
+/// Returns WAV file metadata without loading the full sample data.
+///
+/// # Returns
+/// A [crate::wav::WavInfo] struct containing header and format information.
 pub fn info<P: AsRef<Path>>(path: P) -> WaversResult<WavInfo> {
     let file = std::fs::File::open(path)?;
     let buf_reader = BufReader::new(file);
     let mut wav = Wav::from_reader(buf_reader)?;
     Ok(wav.info())
 }
-
 
 #[cfg(test)]
 pub(crate) mod wav_api_tests {
@@ -536,6 +619,7 @@ pub(crate) mod wav_api_tests {
         assert!((info.duration - exp_dur).abs() < 1e-6, "duration");
     }
 
+    #[cfg(not(feature = "ndarray"))]
     #[test]
     fn test_read_with() {
         // exercise the free `read_with(reader)` taking a BufReader
@@ -550,5 +634,21 @@ pub(crate) mod wav_api_tests {
         assert_eq!(samples[last], expected[last], "last sample");
         assert_eq!(sample_rate, 16000, "sample rate");
         assert_eq!(channels, 1, "channels");
+    }
+
+    #[cfg(feature = "ndarray")]
+    #[test]
+    fn test_read_with() {
+        // exercise the free `read_with(reader)` taking a BufReader
+        let f = File::open(ONE_CHANNEL_WAV_I16).expect("open file");
+        let reader = BufReader::new(f);
+        let (samples, sample_rate) = read_with::<i16, _>(reader).expect("read_with failed");
+        let expected = expected_i16();
+        assert_eq!(samples.len(), expected.len(), "length mismatch");
+        // check last sample matches
+        let last = samples.len() - 1;
+        assert_eq!(*samples.last().unwrap(), expected[last], "last sample");
+        assert_eq!(sample_rate, 16000, "sample rate");
+        assert_eq!(samples.shape()[0], 1, "channels");
     }
 }

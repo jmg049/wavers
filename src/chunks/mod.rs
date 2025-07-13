@@ -11,8 +11,10 @@
 //! - The [`ChunkManager`] which tracks metadata for all discovered chunks.
 //! - [`validate_tag`] and related helpers to ensure correctness when parsing.
 
-
-use crate::{error::{OperationError, ValidationError}, WaversErrorKind, WaversResult};
+use crate::{
+    error::{OperationError, ValidationError},
+    WaversErrorKind, WaversResult,
+};
 use std::{
     fmt::{Debug, Display},
     ops::Deref,
@@ -40,7 +42,6 @@ pub const FACT: ChunkID = ChunkID::new(*b"fact");
 pub const INFO: ChunkID = ChunkID::new(*b"INFO");
 /// Peak chunk identifier
 pub const PEAK: ChunkID = ChunkID::new(*b"PEAK");
-
 
 /// Returns `Ok(())` if the tag is one of the known WAV/RIFF chunk types.
 pub const fn validate_tag(tag: ChunkID) -> WaversResult<()> {
@@ -76,7 +77,9 @@ pub const fn validate_tag(tag: ChunkID) -> WaversResult<()> {
         return Ok(());
     }
 
-    Err(WaversErrorKind::Validate(ValidationError::UnsupportedChunk { id: tag}))
+    Err(WaversErrorKind::Validate(
+        ValidationError::UnsupportedChunk { id: tag },
+    ))
 }
 
 /// A WAV file chunk, consisting of an identifier, size, and data
@@ -431,10 +434,9 @@ impl ChunkManager {
 
     pub fn get_start(&self) -> WaversResult<usize> {
         if self.is_empty() {
-            return Err(WaversErrorKind::Operation(OperationError::InvalidOp{
-                reason : "Called get_start on empty chunk manager.".to_string(),
-            }
-            ));
+            return Err(WaversErrorKind::Operation(OperationError::InvalidOp {
+                reason: "Called get_start on empty chunk manager.".to_string(),
+            }));
         }
         Ok(self.get_chunk_info(&RIFF).unwrap().offset)
     }
@@ -442,7 +444,7 @@ impl ChunkManager {
     pub fn get_end(&self) -> WaversResult<usize> {
         if self.is_empty() {
             return Err(WaversErrorKind::Operation(OperationError::InvalidOp {
-                reason: "Called get_end on empty chunk manager.".to_string()
+                reason: "Called get_end on empty chunk manager.".to_string(),
             }));
         }
         Ok(self

@@ -1,5 +1,5 @@
-use super::{ChunkID, RIFF, WAVE};
-use crate::{error::{ParseError, ValidationError}, WaversErrorKind, WaversResult};
+use super::{ChunkID, WAVE};
+use crate::{error::ValidationError, WaversErrorKind, WaversResult};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RIFFChunk {
@@ -9,14 +9,6 @@ pub struct RIFFChunk {
 }
 
 impl RIFFChunk {
-    pub fn new(file_size: u32) -> Self {
-        Self {
-            riff_tag: RIFF,
-            file_size,
-            wave_tag: WAVE,
-        }
-    }
-
     pub fn parse(bytes: [u8; 12]) -> WaversResult<Self> {
         // Safety for unwrap(). The caller is responsible for checking the RIFF tag first.
         let riff_tag: [u8; 4] = bytes[0..4].try_into().unwrap();

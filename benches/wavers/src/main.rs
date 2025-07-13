@@ -1,4 +1,4 @@
-use audio_sample::{ConvertTo, Samples, I24};
+use audio_sample::{AudioSample, ConvertTo, ConvertCollection, Samples, I24};
 use std::fs::{self, File};
 use std::io::BufReader;
 use std::path::Path;
@@ -29,7 +29,7 @@ struct BenchmarkStats {
 }
 
 // Generate random noise samples
-fn noise(duration_sec: Duration, sample_rate: usize, n_channels: usize) -> Samples<f32> {
+fn noise(duration_sec: Duration, sample_rate: usize, n_channels: usize) -> Box<[f32]> {
     let n_samples = duration_sec.as_secs_f32() * sample_rate as f32 * n_channels as f32;
     let n_samples = n_samples.ceil() as usize;
 
@@ -37,8 +37,7 @@ fn noise(duration_sec: Duration, sample_rate: usize, n_channels: usize) -> Sampl
     let data = (0..n_samples)
         .map(|_| rng.random_range(-1.0..1.0))
         .collect::<Vec<f32>>();
-
-    Samples::from(data.into_boxed_slice())
+    data.into_boxed_slice()
 }
 
 // Calculate benchmark statistics
@@ -123,7 +122,7 @@ fn get_benchmark_times(duration_sec: u64) -> (u64, u64, usize) {
 }
 
 // Benchmark writing operation
-fn benchmark_write<T: audio_sample::AudioSample + 'static>(
+fn benchmark_write<T: AudioSample + 'static>(
     duration: Duration,
     sample_rate: usize,
     n_channels: usize,
@@ -133,7 +132,8 @@ fn benchmark_write<T: audio_sample::AudioSample + 'static>(
           I24: ConvertTo<T>,
           i32: ConvertTo<T>,
           f32: ConvertTo<T>,
-          f64: ConvertTo<T>
+          f64: ConvertTo<T>,
+          T: AudioSample
 {
     let format_name = get_format_name::<T>();
     let tmp_filename = format!(
@@ -145,7 +145,7 @@ fn benchmark_write<T: audio_sample::AudioSample + 'static>(
     );
 
     // Generate samples
-    let samples: Samples<T> = noise(duration, sample_rate, n_channels).convert();
+    let samples: Box<[T]> = noise(duration, sample_rate, n_channels).convert();
 
     // Calculate warm-up and measurement times
     let (warm_up_time, measurement_time, sample_size) = get_benchmark_times(duration.as_secs());
@@ -203,11 +203,11 @@ fn benchmark_read<T: audio_sample::AudioSample + 'static>(
     sample_rate: usize,
     n_channels: usize,
 ) -> BenchmarkStats
-where i16: ConvertTo<T>,
-I24: ConvertTo<T>,
-i32: ConvertTo<T>,
-f32: ConvertTo<T>,
-f64: ConvertTo<T>
+    where i16: ConvertTo<T>,
+    I24: ConvertTo<T>,
+    i32: ConvertTo<T>,
+    f32: ConvertTo<T>,
+    f64: ConvertTo<T>
 {
     let format_name = get_format_name::<T>();
     let tmp_filename = format!(
@@ -219,7 +219,7 @@ f64: ConvertTo<T>
     );
 
     // Generate and write a file for reading benchmark
-    let samples: Samples<T> = noise(duration, sample_rate, n_channels).convert();
+    let samples: Box<[T]> = noise(duration, sample_rate, n_channels).convert();
     wavers::write(
         &tmp_filename,
         &samples,
@@ -246,7 +246,7 @@ f64: ConvertTo<T>
     let warm_up_start = Instant::now();
     while warm_up_start.elapsed().as_secs() < warm_up_time {
         let mut wav: Wav<BufReader<File>> = Wav::<BufReader<File>>::from_path(&tmp_filename).unwrap();
-        let _: Samples<T> = wav.read::<T>().unwrap();
+        let _: Box<[T]> = wav.read::<T>().unwrap();
     }
 
     // Perform measurement
@@ -256,7 +256,7 @@ f64: ConvertTo<T>
     while measurements.len() < sample_size && measurement_start.elapsed().as_secs() < measurement_time {
         let start_sample = Instant::now();
         let mut wav: Wav<BufReader<File>> = Wav::<BufReader<File>>::from_path(&tmp_filename).unwrap();
-        let _: Samples<T> = wav.read::<T>().unwrap();
+        let _: Box<[T]> = wav.read::<T>().unwrap();
         let elapsed = start_sample.elapsed().as_secs_f64();
         measurements.push(elapsed);
     }

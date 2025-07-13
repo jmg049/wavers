@@ -1,12 +1,15 @@
-use crate::chunks::{fmt::FmtChunk, ChunkID, ChunkInfo, ChunkManager, RIFFChunk, DATA, FMT, RIFF};
-use crate::error::OperationError;
-use crate::{mmap_reader::MMapReader, wav_type::WavType, WaversErrorKind, WaversResult};
+use crate::chunks::{ChunkID, ChunkInfo, ChunkManager, DATA, FMT, RIFF, RIFFChunk, fmt::FmtChunk};
+use crate::error::InternalError;
 use crate::{FormatCode, ReadSeek, WavIterators};
+use crate::{WaversErrorKind, WaversResult, wav_type::WavType};
 
+use audio_sample::{AudioSample, ConvertCollection, ConvertTo, I24, I24DiskMethods, Samples};
 
-use audio_sample::I24;
-use audio_sample::{AudioSample, ConvertTo, Samples};
-use std::any::{type_name, TypeId};
+#[cfg(feature = "ndarray")]
+use audio_sample::{ChannelLayout, ToNdarray};
+
+use std::any::{TypeId, type_name};
+use std::fmt::Display;
 use std::fs::File;
 use std::io::BufReader;
 use std::{alloc::Layout, path::Path};
@@ -124,7 +127,7 @@ impl<R: ReadSeek> Wav<R> {
     }
 
     /// Reads all samples in the data chunk.
-    pub fn read<T: AudioSample>(&mut self) -> WaversResult<Samples<T>>
+    pub fn read<T: AudioSample>(&mut self) -> WaversResult<Box<[T]>>
     where
         i16: ConvertTo<T>,
         I24: ConvertTo<T>,
@@ -167,31 +170,48 @@ impl<R: ReadSeek> Wav<R> {
         f64: ConvertTo<T>,
     {
         let samples = self.read::<T>()?;
-        Ok((samples.into_ndarray(self.fmt_chunk.channels)?, self.fmt_chunk.sample_rate))
+        let channels = self.fmt_chunk.channels as usize;
+        let samples = ChannelSamples::new(samples, channels);
+
+        Ok((
+            samples.to_ndarray(channels, ChannelLayout::Interleaved)?,
+            self.fmt_chunk.sample_rate,
+        ))
     }
 
-    
-    /// Writes samples to a new WAV file using the current format.
-    pub fn write<P: AsRef<Path>, T: AudioSample>(&mut self, path: P) -> WaversResult<()>
+    /// Writes samples to a new WAV file using the provided type.
+    pub fn write<P: AsRef<Path>, From: AudioSample, To: AudioSample>(
+        &mut self,
+        path: P,
+    ) -> WaversResult<()>
     where
-        i16: ConvertTo<T>,
-        I24: ConvertTo<T>,
-        i32: ConvertTo<T>,
-        f32: ConvertTo<T>,
-        f64: ConvertTo<T>,
+        To: ConvertTo<To>,
+        i16: ConvertTo<To>,
+        I24: ConvertTo<To>,
+        i32: ConvertTo<To>,
+        f32: ConvertTo<To>,
+        f64: ConvertTo<To>,
     {
-        let samples = self.read()?; // could be an Array2 or a Samples struct
+        let samples: Box<[To]> = self.read::<To>()?;
         let fmt_chunk = self.fmt_chunk();
-        crate::write(
-            path,
-            &samples,
+
+        let file = std::fs::File::create(path)?;
+        let writer = std::io::BufWriter::new(file);
+        let bytes = samples.into_bytes();
+
+        let wav_type = WavType::from(TypeId::of::<To>());
+
+        crate::write_with(
+            writer,
+            &bytes,
+            wav_type,
             fmt_chunk.sample_rate as u32,
             Some(fmt_chunk.channels),
         )
     }
 
     /// Reads a specific number of samples from the data chunk.
-    pub fn read_samples<T: AudioSample>(&mut self, n_samples: usize) -> WaversResult<Samples<T>>
+    pub fn read_samples<T: AudioSample>(&mut self, n_samples: usize) -> WaversResult<Box<[T]>>
     where
         i16: ConvertTo<T>,
         I24: ConvertTo<T>,
@@ -217,33 +237,67 @@ impl<R: ReadSeek> Wav<R> {
         let samples_to_read = bytes_to_read / bytes_per_sample;
 
         if samples_to_read == 0 {
-            return Ok(Samples::from(Box::<[T]>::default()));
+            return Ok(Box::from([]));
         }
 
         let mut raw = alloc_box_buffer(bytes_to_read);
-        self.reader.read_exact(&mut raw)?;
+        let raw_slice = &mut *raw;
+        self.reader.read_exact(raw_slice)?;
         self.bytes_read += bytes_to_read;
         self.bytes_remaining -= bytes_to_read;
 
         if target_type == native_type && native_type != WavType::Pcm24 {
-            return Ok(Samples::from(cast_bytes::<T>(&raw)?));
+            // First verify that our data is compatible with the target type
+
+            // Transmute the Box<[u8]> into Box<[T]>
+            let boxed_t = unsafe {
+                // Convert Box<[u8]> to raw pointer
+                let raw_ptr = Box::into_raw(raw);
+
+                // Calculate the correct length for T
+                let len_in_t = bytes_to_read / std::mem::size_of::<T>();
+
+                // Create a new Box<[T]> from the raw pointer
+                Box::from_raw(std::slice::from_raw_parts_mut(raw_ptr as *mut T, len_in_t))
+            };
+
+            return Ok(boxed_t);
         }
 
         match native_type {
             WavType::Pcm16 | WavType::EPcm16 => {
-                Ok(Samples::from(cast_bytes::<i16>(&raw)?).convert())
+                let boxed_data = transmute_box::<i16>(raw, bytes_to_read);
+                Ok(boxed_data.convert_into())
             }
-            WavType::Pcm24 | WavType::EPcm24 => Ok(read_i24(&raw).convert()),
+            WavType::Pcm24 | WavType::EPcm24 => {
+                let boxed_data = match I24::read_i24s_le(&raw) {
+                    Some(i24s) => i24s.into_boxed_slice(),
+                    None => {
+                        return Err(WaversErrorKind::Internal(InternalError::Bug(
+                            "Failed to read I24 samples".to_string(),
+                        )));
+                    }
+                };
+                Ok(boxed_data.convert_into())
+            }
             WavType::Pcm32 | WavType::EPcm32 => {
-                Ok(Samples::from(cast_bytes::<i32>(&raw)?).convert())
+                let boxed_data = transmute_box::<i32>(raw, bytes_to_read);
+                Ok(boxed_data.convert_into())
             }
             WavType::Float32 | WavType::EFloat32 => {
-                Ok(Samples::from(cast_bytes::<f32>(&raw)?).convert())
+                let boxed_data = transmute_box::<f32>(raw, bytes_to_read);
+                Ok(boxed_data.convert_into())
             }
             WavType::Float64 | WavType::EFloat64 => {
-                Ok(Samples::from(cast_bytes::<f64>(&raw)?).convert())
+                let boxed_data = transmute_box::<f64>(raw, bytes_to_read);
+                Ok(boxed_data.convert_into())
             }
-            _ => unreachable!("WavType::Unknown should have errored above"),
+            _ => {
+                return Err(WaversErrorKind::Internal(InternalError::Bug(format!(
+                    "Unsupported format {}",
+                    native_type
+                ))));
+            }
         }
     }
 
@@ -255,13 +309,13 @@ impl<R: ReadSeek> Wav<R> {
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
     {
-        let samples = self.read_samples(1)?;
+        let samples: Box<[T]> = self.read_samples(1)?;
         samples.first().copied().ok_or(WaversErrorKind::Operation(
             crate::error::OperationError::EmptyChunks { op: "read_sample" },
         ))
     }
 
-    pub fn read_frame<T: AudioSample>(&mut self) -> WaversResult<Samples<T>>
+    pub fn read_frame<T: AudioSample>(&mut self) -> WaversResult<Box<[T]>>
     where
         i16: ConvertTo<T>,
         I24: ConvertTo<T>,
@@ -269,10 +323,11 @@ impl<R: ReadSeek> Wav<R> {
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
     {
-        self.read_samples(self.fmt_chunk.channels as usize)
+        let samples = self.read_samples(self.fmt_chunk.channels as usize)?;
+        Ok(samples)
     }
 
-    pub fn read_frames<T: AudioSample>(&mut self, n_frames: usize) -> WaversResult<Samples<T>>
+    pub fn read_frames<T: AudioSample>(&mut self, n_frames: usize) -> WaversResult<Box<[T]>>
     where
         i16: ConvertTo<T>,
         I24: ConvertTo<T>,
@@ -284,9 +339,7 @@ impl<R: ReadSeek> Wav<R> {
     }
 
     pub fn info(&mut self) -> WavInfo {
-        let data_chunk = *self
-            .chunk_info
-            .get_chunk_info(&DATA).unwrap();
+        let data_chunk = *self.chunk_info.get_chunk_info(&DATA).unwrap();
         let fmt = self.fmt_chunk();
 
         let bytes_per_sample = fmt.bits_per_sample / 8;
@@ -305,6 +358,64 @@ impl<R: ReadSeek> Wav<R> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ChannelSamples<T: AudioSample> {
+    pub samples: Box<[T]>,
+    pub channels: usize,
+}
+
+impl<T: AudioSample> ChannelSamples<T> {
+    pub fn new(samples: Box<[T]>, channels: usize) -> Self {
+        Self { samples, channels }
+    }
+}
+
+impl<T: AudioSample> Default for ChannelSamples<T> {
+    fn default() -> Self {
+        Self {
+            samples: Box::new([]),
+            channels: 1,
+        }
+    }
+}
+
+impl<T: AudioSample> IntoIterator for ChannelSamples<T> {
+    type Item = T;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.samples.into_iter()
+    }
+}
+impl<T: AudioSample> AsRef<[T]> for ChannelSamples<T> {
+    fn as_ref(&self) -> &[T] {
+        &self.samples
+    }
+}
+
+impl<T: AudioSample> AsMut<[T]> for ChannelSamples<T> {
+    fn as_mut(&mut self) -> &mut [T] {
+        &mut self.samples
+    }
+}
+
+impl<T: AudioSample> Samples for ChannelSamples<T> {
+    fn len(&self) -> usize {
+        self.samples.len()
+    }
+}
+
+#[cfg(feature = "ndarray")]
+impl<T: AudioSample> ToNdarray<T> for ChannelSamples<T> {
+    fn to_ndarray(
+        self,
+        channels: usize,
+        layout: ChannelLayout,
+    ) -> audio_sample::AudioSampleResult<ndarray::Array2<T>> {
+        self.samples.to_ndarray(channels, layout)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct WavInfo {
     pub sample_rate: u32,
@@ -316,25 +427,26 @@ pub struct WavInfo {
     pub duration: f32,
 }
 
-impl Wav<MMapReader> {
-    pub fn from_mmap(mmap: memmap2::Mmap) -> WaversResult<Self> {
-        let reader = MMapReader::new(mmap)?;
-        Self::from_reader(reader)
+impl Display for WavInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "WAV Info: {} channels, {} Hz, {} bits per sample, {} bytes per sample, {} samples, {:.2} seconds",
+            self.channels,
+            self.sample_rate,
+            self.bits_per_sample,
+            self.bytes_per_sample,
+            self.n_samples,
+            self.duration
+        )
     }
 }
 
-fn read_i24(samples: &Box<[u8]>) -> Samples<I24> {
-    let n_samples = samples.len() / 3;
-
-    let mut i24_samples: Box<[I24]> = alloc_sample_buffer(n_samples);
-    for i in 0..n_samples {
-        let sample = &samples[i * 3..(i + 1) * 3];
-        let i32_sample = i32::from_le_bytes([0, sample[0], sample[1], sample[2]]);
-        i24_samples[i] = I24::saturating_from_i32(i32_sample);
-    }
-    i24_samples.into()
+fn transmute_box<U>(raw: Box<[u8]>, bytes_to_read: usize) -> Box<[U]> {
+    let raw_ptr = Box::into_raw(raw);
+    let len = bytes_to_read / std::mem::size_of::<U>();
+    unsafe { Box::from_raw(std::slice::from_raw_parts_mut(raw_ptr as *mut U, len)) }
 }
-
 
 fn find_all_chunks<'c, R: ReadSeek>(reader: &mut R) -> WaversResult<ChunkManager> {
     // Have to find the RIFF chunk first
@@ -433,44 +545,12 @@ pub(crate) fn alloc_box_buffer(len: usize) -> Box<[u8]> {
     unsafe { Box::from_raw(slice_ptr) }
 }
 
-/// Reinterpret a byte slice as a slice of type `T`.
-/// Returns an error if the alignment is incorrect or the length isn't a multiple of T.
-///
-/// # Safety
-/// T must be a plain-old-data (POD) type with no padding-sensitive layout or drop logic.
-pub(crate) fn cast_bytes<T>(bytes: &[u8]) -> WaversResult<&[T]> {
-    use std::mem::{align_of, size_of};
-
-    if size_of::<T>() == 0 {
-        return Err(WaversErrorKind::Operation(OperationError::InvalidOp {
-            reason: "Cannot cast to zero-sized type".to_string(),
-        }));
-    }
-
-    if bytes.as_ptr().align_offset(align_of::<T>()) != 0 {
-        return Err(WaversErrorKind::Operation(OperationError::InvalidOp {
-            reason: "Input bytes are not properly aligned for target type".to_string(),
-        }));
-    }
-
-    if bytes.len() % size_of::<T>() != 0 {
-        return Err(WaversErrorKind::Operation(OperationError::InvalidOp {
-            reason: "Input length is not a multiple of target type size".to_string(),
-        }));
-    }
-
-    let len = bytes.len() / size_of::<T>();
-    let ptr = bytes.as_ptr() as *const T;
-
-    unsafe { Ok(std::slice::from_raw_parts(ptr, len)) }
-}
-
 // in src/lib.rs (or wherever your Wav type lives)
 #[cfg(test)]
 mod wav_tests {
     use super::*;
     use crate::wav_api_tests::read_text_to_vec;
-    use audio_sample::{Samples, I24};
+    use audio_sample::{I24, Samples};
     use std::fs::File;
     use std::io::BufReader;
     use std::path::Path;
@@ -503,7 +583,7 @@ mod wav_tests {
                 fn $name() {
                     let f = File::open($wav).expect("open");
                     let mut wav = Wav::from_reader(BufReader::new(f)).expect("from_reader");
-                    let samples: Samples<$ty> = wav.read().expect("read");
+                    let samples: Box<[$ty]> = wav.read().expect("read");
                     let expected: Vec<$ty> =
                         read_text_to_vec(Path::new($expected)).expect("read expected");
                     assert_eq!(samples.len(), expected.len(),
@@ -544,15 +624,15 @@ mod wav_tests {
                     // read the original file as $ty
                     let f = File::open(ONE_CHANNEL_WAV_I16).expect("open");
                     let mut wav = Wav::from_reader(BufReader::new(f)).expect("from_reader");
-                    let samples: Samples<$ty> = wav.read().expect("read");
+                    let samples: Box<[$ty]> = wav.read().expect("read");
                     let fmt = wav.fmt_chunk();
 
                     // ── write & read back ─────────────────────────────────────────
-                    crate::write(&out, &samples, fmt.sample_rate as u32, Some(fmt.channels))
+                    crate::write::<_, $ty, $ty>(&out, &samples, fmt.sample_rate as u32, Some(fmt.channels))
                         .expect("write");
                     let mut reread = Wav::from_reader(BufReader::new(File::open(&out).unwrap()))
                         .expect("open reread");
-                    let new_samples: Samples<$ty> = reread.read().expect("read reread");
+                    let new_samples: Box<[$ty]> = reread.read().expect("read reread");
 
                     // ── compare sample data ───────────────────────────────────────
                     assert_eq!(samples.len(), new_samples.len(), "len {}", $suffix);
@@ -602,6 +682,7 @@ mod wav_tests {
     }
 
     // ——— read tests ——————————————————————————————————————
+    #[cfg(not(feature = "ndarray"))]
     mod wav_read_tests {
         use crate::iter::WavIterators;
 
@@ -611,7 +692,7 @@ mod wav_tests {
         fn test_read_single_channel() {
             let f = File::open(ONE_CHANNEL_WAV_I16).unwrap();
             let mut wav = Wav::from_reader(BufReader::new(f)).unwrap();
-            let samples: Samples<i16> = wav.read().unwrap();
+            let samples: Box<[i16]> = wav.read().unwrap();
             let expected: Vec<i16> = read_text_to_vec(Path::new(ONE_CHANNEL_EXPECTED_I16)).unwrap();
             assert_eq!(samples.len(), expected.len());
             for (i, (e, a)) in expected.iter().zip(samples.iter()).enumerate() {
@@ -623,7 +704,7 @@ mod wav_tests {
         fn test_read_two_channel() {
             let f = File::open(TWO_CHANNEL_WAV_I16).unwrap();
             let mut wav = Wav::from_reader(BufReader::new(f)).unwrap();
-            let samples: Samples<i16> = wav.read().unwrap();
+            let samples: Box<[i16]> = wav.read().unwrap();
             // stereo interleaved == two copies of mono
             let mono: Vec<i16> = read_text_to_vec(Path::new(ONE_CHANNEL_EXPECTED_I16)).unwrap();
             let mut expected = Vec::with_capacity(mono.len() * 2);
@@ -646,13 +727,16 @@ mod wav_tests {
             let f = File::open(ONE_CHANNEL_WAV_I24).unwrap();
             let mut wav = Wav::from_reader(BufReader::new(f)).unwrap();
             assert_eq!(wav.fmt_chunk().bits_per_sample, 24);
-            let samples: Samples<I24> = wav.read().unwrap();
+            let samples: Box<[I24]> = wav.read().unwrap();
             let expected_i32: Vec<i32> =
                 read_text_to_vec(Path::new(ONE_CHANNEL_EXPECTED_I24)).unwrap();
+
             let expected: Vec<I24> = expected_i32
                 .into_iter()
-                .map(I24::saturating_from_i32)
+                .map(|x| x >> 8)
+                .map(I24::wrapping_from_i32)
                 .collect();
+
             assert_eq!(samples.len(), expected.len());
             for (i, (e, a)) in expected.iter().zip(samples.iter()).enumerate() {
                 assert_eq!(e.to_i32(), a.to_i32(), "at idx {}", i);
@@ -663,10 +747,11 @@ mod wav_tests {
         fn test_convert_formats() {
             let f = File::open(ONE_CHANNEL_WAV_I16).unwrap();
             let mut wav = Wav::from_reader(BufReader::new(f)).unwrap();
-            let samples: Samples<f32> = wav.read().unwrap();
+            let samples: Box<[i16]> = wav.read().unwrap();
             let expected: Vec<f32> = read_text_to_vec(Path::new(ONE_CHANNEL_EXPECTED_F32)).unwrap();
             assert_eq!(samples.len(), expected.len());
-            for (i, (e, a)) in expected.iter().zip(samples.iter()).enumerate() {
+            for (i, (e, a)) in expected.iter().zip(samples).enumerate() {
+                let a: f32 = a.convert_to();
                 let diff = (e - a).abs();
                 assert!(diff < 1e-5, "at idx {} diff {}", i, diff);
             }
@@ -678,7 +763,7 @@ mod wav_tests {
             let mut wav = Wav::from_reader(BufReader::new(f1)).unwrap();
             let f2 = File::open(ONE_CHANNEL_WAV_I16).unwrap();
             let mut cmp = Wav::from_reader(BufReader::new(f2)).unwrap();
-            let all: Samples<i16> = cmp.read().unwrap();
+            let all: Box<[i16]> = cmp.read().unwrap();
             let pos: usize = 1_000;
             wav.to_data();
             wav.seek_by_samples(pos as u64).unwrap();
@@ -720,7 +805,7 @@ mod wav_tests {
             let sr = wav.fmt_chunk().sample_rate as u64;
             wav.to_data();
             wav.seek_by_samples(sr).unwrap();
-            let chunk: Samples<i16> = wav.read_samples(100).unwrap();
+            let chunk: Box<[i16]> = wav.read_samples(100).unwrap();
             let expected: Vec<i16> = read_text_to_vec(Path::new(ONE_CHANNEL_EXPECTED_I16)).unwrap();
             let slice = &expected[sr as usize..sr as usize + 100];
             assert_eq!(chunk.as_ref(), slice);
@@ -739,6 +824,7 @@ mod wav_tests {
     }
 
     // ——— write tests —————————————————————————————————————
+    #[cfg(not(feature = "ndarray"))]
     mod wav_write_tests {
         use super::*;
 
@@ -753,15 +839,16 @@ mod wav_tests {
             // read original
             let f = File::open(ONE_CHANNEL_WAV_I16).unwrap();
             let mut wav = Wav::from_reader(BufReader::new(f)).unwrap();
-            let samples: Samples<i16> = wav.read().unwrap();
+            let samples: Box<[i16]> = wav.read().unwrap();
             let fmt = wav.fmt_chunk();
 
             // write
-            crate::write(&out, &samples, fmt.sample_rate as u32, Some(fmt.channels)).unwrap();
+            crate::write::<_, i16, i16>(&out, &samples, fmt.sample_rate as u32, Some(fmt.channels))
+                .unwrap();
 
             // read back
             let mut reread = Wav::from_reader(BufReader::new(File::open(&out).unwrap())).unwrap();
-            let new: Samples<i16> = reread.read().unwrap();
+            let new: Box<[i16]> = reread.read().unwrap();
             assert_eq!(samples.len(), new.len());
             for (i, (o, n)) in samples.iter().zip(new.iter()).enumerate() {
                 assert_eq!(*o, *n, "at idx {}", i);
@@ -780,11 +867,17 @@ mod wav_tests {
             // read & convert
             let f = File::open(ONE_CHANNEL_WAV_I16).unwrap();
             let mut wav = Wav::from_reader(BufReader::new(f)).unwrap();
-            let samples: Samples<f32> = wav.read().unwrap();
+            let samples: Box<[f32]> = wav.read().unwrap();
             let fmt = wav.fmt_chunk();
 
             // write float
-            crate::write(&out, &samples, fmt.sample_rate as u32, Some(fmt.channels)).unwrap();
+            crate::write::<&Path, f32, f32>(
+                &out,
+                &samples,
+                fmt.sample_rate as u32,
+                Some(fmt.channels),
+            )
+            .unwrap();
 
             // verify header
             let mut new_wav = Wav::from_reader(BufReader::new(File::open(&out).unwrap())).unwrap();
@@ -793,8 +886,9 @@ mod wav_tests {
             assert_eq!(new_fmt.bits_per_sample, 32);
 
             // read back & compare
-            let mut r = Wav::from_reader(BufReader::new(File::open(&out).unwrap())).unwrap();
-            let new: Samples<f32> = r.read().unwrap();
+            let mut r: Wav<BufReader<File>> =
+                Wav::from_reader(BufReader::new(File::open(&out).unwrap())).unwrap();
+            let new: Box<[f32]> = r.read().unwrap();
             assert_eq!(new.len(), samples.len());
             for (i, (a, b)) in samples.iter().zip(new.iter()).enumerate() {
                 assert!((a - b).abs() < 1e-5, "at idx {}", i);

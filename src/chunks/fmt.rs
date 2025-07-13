@@ -28,6 +28,7 @@ use nom::IResult;
 const EXTENDED_FMT_GUID: [u8; 14] = *b"\x00\x00\x00\x00\x10\x00\x80\x00\x00\xAA\x00\x38\x9B\x71";
 
 /// Standard sizes for the format chunk
+#[allow(dead_code)]
 pub mod chunk_sizes {
     /// The standard size of a basic (non-extensible) format chunk: 16 bytes
     pub const STANDARD_SIZE: usize = 16;
@@ -105,6 +106,7 @@ pub const SPEAKER_TOP_BACK_RIGHT: u32 = 0x20000;
 
 /// Common channel configurations
 pub mod channel_configs {
+    #[allow(dead_code)]
     use super::*;
 
     /// Mono configuration (1 channel)
@@ -143,6 +145,7 @@ pub mod channel_configs {
 
 // Helper functions for working with channel masks
 /// Functions for working with channel masks
+#[allow(dead_code)]
 pub mod channel_mask {
     use super::*;
 
@@ -305,10 +308,13 @@ pub mod channel_mask {
         let mask_channels = channel_count(mask);
 
         if mask_channels != channels {
-            return Err(WaversErrorKind::Validate(ValidationError::Chunk{chunk_id: FMT, reason: format!(
-                "Channel mask specifies {} channels but format specifies {} channels",
-                mask_channels, channels
-            )}));
+            return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                chunk_id: FMT,
+                reason: format!(
+                    "Channel mask specifies {} channels but format specifies {} channels",
+                    mask_channels, channels
+                ),
+            }));
         }
 
         Ok(())
@@ -564,10 +570,11 @@ impl FmtChunk {
             if let Some(ext_info) = &self.ext_fmt_chunk {
                 ext_info.validate(self.format, self.bits_per_sample)?;
             } else {
-                return Err(WaversErrorKind::Validate(ValidationError::Chunk{chunk_id: FMT, reason:
-                    "Format is WaveFormatExtensible but extended format info is missing"
-                        .to_string(),}
-                ));
+                return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                    chunk_id: FMT,
+                    reason: "Format is WaveFormatExtensible but extended format info is missing"
+                        .to_string(),
+                }));
             }
         }
 
@@ -870,10 +877,13 @@ impl TryFrom<&[u8]> for FmtChunk {
     fn try_from(chunk: &[u8]) -> Result<Self, Self::Error> {
         // Verify minimum chunk size
         if chunk.len() < 16 {
-            return Err(WaversErrorKind::Validate(ValidationError::Chunk{chunk_id: FMT, reason: format!(
-                "Format chunk too small: expected at least 16 bytes, got {} bytes",
-                chunk.len()
-            )}));
+            return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                chunk_id: FMT,
+                reason: format!(
+                    "Format chunk too small: expected at least 16 bytes, got {} bytes",
+                    chunk.len()
+                ),
+            }));
         }
 
         let data: &[u8] = chunk;
@@ -887,8 +897,10 @@ impl TryFrom<&[u8]> for FmtChunk {
 
         // Validate channels
         if channels == 0 {
-            return Err(WaversErrorKind::Validate(ValidationError::Chunk{chunk_id: FMT, reason: "Number of channels cannot be 0".to_string()}
-            ));
+            return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                chunk_id: FMT,
+                reason: "Number of channels cannot be 0".to_string(),
+            }));
         }
 
         // Parse sample rate
@@ -896,10 +908,10 @@ impl TryFrom<&[u8]> for FmtChunk {
 
         // Validate sample rate
         if sample_rate <= 0 {
-            return Err(WaversErrorKind::Validate(ValidationError::Chunk{chunk_id: FMT, reason: format!(
-                "Invalid sample rate: {}",
-                sample_rate
-            )}));
+            return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                chunk_id: FMT,
+                reason: format!("Invalid sample rate: {}", sample_rate),
+            }));
         }
 
         // Parse byte rate
@@ -913,9 +925,10 @@ impl TryFrom<&[u8]> for FmtChunk {
 
         // Validate bits per sample
         if bits_per_sample == 0 {
-            return Err(WaversErrorKind::Validate(ValidationError::Chunk { chunk_id: FMT, reason:
-                "Bits per sample cannot be 0".to_string(),}
-            ));
+            return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                chunk_id: FMT,
+                reason: "Bits per sample cannot be 0".to_string(),
+            }));
         }
 
         // Verify byte_rate and block_align for consistency
@@ -953,10 +966,13 @@ impl TryFrom<&[u8]> for FmtChunk {
                     0 => 2,   // Just the cb_size field for Base
                     22 => 24, // CB_Size + Extended data fields (2+2+4+2+14)
                     _ => {
-                        return Err(WaversErrorKind::Validate(ValidationError::Chunk{chunk_id: FMT, reason: format!(
-                            "Invalid cb_size value in extended format chunk: {}",
-                            cb_size_raw
-                        )}));
+                        return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                            chunk_id: FMT,
+                            reason: format!(
+                                "Invalid cb_size value in extended format chunk: {}",
+                                cb_size_raw
+                            ),
+                        }));
                     }
                 };
 
@@ -984,10 +1000,12 @@ impl TryFrom<&[u8]> for FmtChunk {
                         CbSize::Extended => 16 + 2 + 22, // Base size + cb_size field + extended data
                     }
                 } else {
-                    return Err(WaversErrorKind::Validate(ValidationError::Chunk{chunk_id:  FMT, 
-                        reason: "Format is WaveFormatExtensible but extended format chunk is missing"
-                            .to_string(),}
-                    ));
+                    return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                        chunk_id: FMT,
+                        reason:
+                            "Format is WaveFormatExtensible but extended format chunk is missing"
+                                .to_string(),
+                    }));
                 }
             }
             _ => 16, // Base size only for non-extensible formats
@@ -1037,10 +1055,10 @@ impl TryFrom<u16> for CbSize {
         match value {
             0 => Ok(CbSize::Base),
             22 => Ok(CbSize::Extended),
-            _ => Err(WaversErrorKind::Validate(ValidationError::Chunk{chunk_id: FMT, reason: format!(
-                "Error parsing CB Size, invalid value : {}",
-                value
-            )})),
+            _ => Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                chunk_id: FMT,
+                reason: format!("Error parsing CB Size, invalid value : {}", value),
+            })),
         }
     }
 }
@@ -1372,35 +1390,45 @@ impl ExtFmtChunkInfo {
     ) -> Result<(), WaversErrorKind> {
         // If format is not extended, ext_fmt_chunk should have cb_size Base
         if format != FormatCode::WaveFormatExtensible && self.cb_size != CbSize::Base {
-            return Err(WaversErrorKind::Validate(ValidationError::Chunk{chunk_id: FMT, reason: format!(
-                "Format code is {:?} but extended format info has cb_size {:?}",
-                format, self.cb_size
-            )}));
+            return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                chunk_id: FMT,
+                reason: format!(
+                    "Format code is {:?} but extended format info has cb_size {:?}",
+                    format, self.cb_size
+                ),
+            }));
         }
 
         // If format is extended, check that we have extended data
         if format == FormatCode::WaveFormatExtensible {
             if self.cb_size != CbSize::Extended {
-                return Err(WaversErrorKind::Validate(ValidationError::Chunk{
-                    chunk_id: FMT, reason: format!("Format code is WaveFormatExtensible but cb_size is {:?}",
-                    self.cb_size
-                )}));
+                return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                    chunk_id: FMT,
+                    reason: format!(
+                        "Format code is WaveFormatExtensible but cb_size is {:?}",
+                        self.cb_size
+                    ),
+                }));
             }
 
             if self.extended_data.is_none() {
-                return Err(WaversErrorKind::Validate(ValidationError::Chunk{
-                    chunk_id: FMT, reason: "Format code is WaveFormatExtensible but extended data is missing".to_string(),
-                }
-                ));
+                return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                    chunk_id: FMT,
+                    reason: "Format code is WaveFormatExtensible but extended data is missing"
+                        .to_string(),
+                }));
             }
 
             // Validate valid_bits_per_sample
             if let Some(data) = &self.extended_data {
                 if data.valid_bits_per_sample > bits_per_sample {
-                    return Err(WaversErrorKind::Validate(ValidationError::Chunk{chunk_id: FMT, reason: format!(
+                    return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                        chunk_id: FMT,
+                        reason: format!(
                         "valid_bits_per_sample ({}) cannot be greater than bits_per_sample ({})",
                         data.valid_bits_per_sample, bits_per_sample
-                    )}));
+                    ),
+                    }));
                 }
             }
         }
@@ -1456,9 +1484,10 @@ impl TryFrom<&[u8]> for ExtFmtChunkInfo {
     fn try_from(data: &[u8]) -> Result<Self, Self::Error> {
         // Validate minimum data size
         if data.is_empty() {
-            return Err(WaversErrorKind::Validate(ValidationError::Chunk{
-                chunk_id: FMT, reason: "Extended format chunk data is empty".to_string(),}
-            ));
+            return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                chunk_id: FMT,
+                reason: "Extended format chunk data is empty".to_string(),
+            }));
         }
 
         // Parse CB size
@@ -1467,10 +1496,13 @@ impl TryFrom<&[u8]> for ExtFmtChunkInfo {
             Ok(size) => size,
             Err(e) => {
                 // Provide more context about the error
-                return Err(WaversErrorKind::Validate(ValidationError::Chunk{chunk_id: FMT, reason: format!(
+                return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                    chunk_id: FMT,
+                    reason: format!(
                     "Invalid cb_size value {}: {}. Expected values are 0 (Base) or 22 (Extended)",
                     cb_size_raw, e
-                )}));
+                ),
+                }));
             }
         };
 
@@ -1492,9 +1524,10 @@ impl TryFrom<&[u8]> for ExtFmtChunkInfo {
 
                 // Validate valid_bits_per_sample
                 if valid_bits_per_sample == 0 {
-                    return Err(WaversErrorKind::Validate(ValidationError::BitDepth{
-                        bits: 0, format: FormatCode::WaveFormatExtensible}
-                    ));
+                    return Err(WaversErrorKind::Validate(ValidationError::BitDepth {
+                        bits: 0,
+                        format: FormatCode::WaveFormatExtensible,
+                    }));
                 }
 
                 // Parse channel mask
@@ -1506,9 +1539,13 @@ impl TryFrom<&[u8]> for ExtFmtChunkInfo {
 
                 // Verify we have GUID data
                 if remaining.len() < 14 {
-                    return Err(WaversErrorKind::Validate(ValidationError::Chunk {chunk_id: FMT, reason: format!(
-                        "Missing GUID data in extended format chunk: expected 14 bytes, got {}",  remaining.len()
-                    )}));
+                    return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                        chunk_id: FMT,
+                        reason: format!(
+                            "Missing GUID data in extended format chunk: expected 14 bytes, got {}",
+                            remaining.len()
+                        ),
+                    }));
                 }
 
                 // Check if the GUID matches the standard
@@ -1730,7 +1767,6 @@ mod fmt_chunk_tests {
 
         let result = fmt.validate();
         assert!(result.is_err());
-
     }
 
     #[test]
@@ -1740,7 +1776,6 @@ mod fmt_chunk_tests {
 
         let result = fmt.validate();
         assert!(result.is_err());
-
     }
 
     #[test]

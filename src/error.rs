@@ -11,7 +11,7 @@
 //! 3. **[`WaversResult`]** – `core::result::Result` alias with the default error.  
 //! 4. Tiny helper methods like [`WaversErrorKind::domain`] and [`WaversErrorKind::code`].
 
-use crate::{chunks::ChunkID, wav_type::WavType, FormatCode};
+use crate::{FormatCode, chunks::ChunkID, wav_type::WavType};
 use thiserror::Error;
 
 /// Crate‑wide result alias.

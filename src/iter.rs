@@ -20,10 +20,10 @@
 //! Use the [`WavIterators`] extension trait for easy access to all iterator types.
 
 use crate::{
+    ReadSeek, WaversErrorKind, WaversResult,
     chunks::DATA,
     error::{OperationError, ParseError},
-    wav::{alloc_sample_buffer, Wav},
-    ReadSeek, WaversErrorKind, WaversResult,
+    wav::{Wav, alloc_sample_buffer},
 };
 use audio_samples::{AudioSample, ConvertTo, I24};
 use std::io::SeekFrom;
@@ -430,7 +430,6 @@ where
                         self.current_block = self.total_blocks;
                         return None;
                     }
-
                 }
             }
         } else if leading_zeros > 0 {
@@ -689,7 +688,7 @@ mod tests {
     use std::io::BufReader;
     use std::path::Path;
 
-    // Constants for test filesclaude 
+    // Constants for test filesclaude
     const TWO_CHANNEL_WAV_I16: &str = "./test_resources/two_channel_i16.wav";
 
     // Helper function to create a wav for testing
@@ -762,15 +761,17 @@ mod tests {
     fn test_as_audio_samples() {
         if Path::new(TWO_CHANNEL_WAV_I16).exists() {
             let mut wav = create_test_wav::<f32>(TWO_CHANNEL_WAV_I16);
-            
+
             // Test the new as_audio_samples method
-            let audio = wav.as_audio_samples::<f32>().expect("Failed to get AudioSamples");
-            
+            let audio = wav
+                .as_audio_samples::<f32>()
+                .expect("Failed to get AudioSamples");
+
             // Verify it has the expected metadata
             assert_eq!(audio.sample_rate(), 16000, "sample rate");
             assert_eq!(audio.channels(), 2, "channels");
             assert!(!audio.is_mono(), "should not be mono");
-            
+
             // Test that we can use AudioSamples methods
             let rms = audio.rms();
             let peak = audio.peak();

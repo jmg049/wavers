@@ -1,4 +1,4 @@
-use audio_sample::{AudioSample, ConvertTo, ConvertCollection, Samples, I24};
+use audio_samples::{AudioSample, ConvertTo, ConvertCollection, Samples, I24, AudioSamples};
 use std::fs::{self, File};
 use std::io::BufReader;
 use std::path::Path;
@@ -197,8 +197,8 @@ fn benchmark_write<T: AudioSample + 'static>(
     calculate_stats(&measurements, file_size)
 }
 
-// Benchmark reading operation
-fn benchmark_read<T: audio_sample::AudioSample + 'static>(
+// Benchmark reading operation using AudioSamples
+fn benchmark_read_audio_samples<T: AudioSample + 'static>(
     duration: Duration,
     sample_rate: usize,
     n_channels: usize,
@@ -245,8 +245,77 @@ fn benchmark_read<T: audio_sample::AudioSample + 'static>(
     // Perform warm-up
     let warm_up_start = Instant::now();
     while warm_up_start.elapsed().as_secs() < warm_up_time {
+        let _: AudioSamples<T> = wavers::read_audio(&tmp_filename).unwrap();
+    }
+
+    // Perform measurement
+    let mut measurements = Vec::with_capacity(sample_size);
+    let measurement_start = Instant::now();
+
+    while measurements.len() < sample_size && measurement_start.elapsed().as_secs() < measurement_time {
+        let start_sample = Instant::now();
+        let _: AudioSamples<T> = wavers::read_audio(&tmp_filename).unwrap();
+        let elapsed = start_sample.elapsed().as_secs_f64();
+        measurements.push(elapsed);
+    }
+
+    // Get file size
+    let file_size = fs::metadata(&tmp_filename).unwrap().len();
+
+    // Calculate statistics
+    calculate_stats(&measurements, file_size)
+}
+
+// Benchmark Wav::to_audio_samples operation
+fn benchmark_wav_to_audio_samples<T: AudioSample + 'static>(
+    duration: Duration,
+    sample_rate: usize,
+    n_channels: usize,
+) -> BenchmarkStats
+    where i16: ConvertTo<T>,
+    I24: ConvertTo<T>,
+    i32: ConvertTo<T>,
+    f32: ConvertTo<T>,
+    f64: ConvertTo<T>
+{
+    let format_name = get_format_name::<T>();
+    let tmp_filename = format!(
+        "./tmp_bench_resources/Wavers_wav_to_audio_samples_{}_{}s_{}Hz_{}ch.wav",
+        format_name,
+        duration.as_secs(),
+        sample_rate,
+        n_channels
+    );
+
+    // Generate and write a file for the benchmark
+    let samples: Box<[T]> = noise(duration, sample_rate, n_channels).convert();
+    wavers::write(
+        &tmp_filename,
+        &samples,
+        sample_rate as u32,
+        Some(n_channels as u16),
+    )
+    .unwrap();
+
+    // Calculate warm-up and measurement times
+    let (warm_up_time, measurement_time, sample_size) = get_benchmark_times(duration.as_secs());
+
+    println!(
+        "Wav::to_audio_samples {} - {}s - {}Hz - {}ch (Warm-up: {}s, Measurement: {}s, Samples: {})...",
+        format_name,
+        duration.as_secs(),
+        sample_rate,
+        n_channels,
+        warm_up_time,
+        measurement_time,
+        sample_size
+    );
+
+    // Perform warm-up
+    let warm_up_start = Instant::now();
+    while warm_up_start.elapsed().as_secs() < warm_up_time {
         let mut wav: Wav<BufReader<File>> = Wav::<BufReader<File>>::from_path(&tmp_filename).unwrap();
-        let _: Box<[T]> = wav.read::<T>().unwrap();
+        let _: AudioSamples<T> = wav.to_audio_samples().unwrap();
     }
 
     // Perform measurement
@@ -256,7 +325,7 @@ fn benchmark_read<T: audio_sample::AudioSample + 'static>(
     while measurements.len() < sample_size && measurement_start.elapsed().as_secs() < measurement_time {
         let start_sample = Instant::now();
         let mut wav: Wav<BufReader<File>> = Wav::<BufReader<File>>::from_path(&tmp_filename).unwrap();
-        let _: Box<[T]> = wav.read::<T>().unwrap();
+        let _: AudioSamples<T> = wav.to_audio_samples().unwrap();
         let elapsed = start_sample.elapsed().as_secs_f64();
         measurements.push(elapsed);
     }
@@ -272,6 +341,7 @@ fn benchmark_read<T: audio_sample::AudioSample + 'static>(
 fn stats_to_json(
     write_stats: &BenchmarkStats,
     read_stats: &BenchmarkStats,
+    wav_to_audio_samples_stats: &BenchmarkStats,
     format_name: &str,
     duration_sec: u64,
     sample_rate: usize,
@@ -308,6 +378,21 @@ fn stats_to_json(
             "file_size_bytes": read_stats.file_size,
             "sample_count": read_stats.sample_count
         }),
+        json!({
+            "operation": "wav_to_audio_samples",
+            "format": format_name,
+            "duration_sec": duration_sec,
+            "sample_rate": sample_rate,
+            "channels": n_channels,
+            "mean_time": wav_to_audio_samples_stats.mean,
+            "min_time": wav_to_audio_samples_stats.min,
+            "max_time": wav_to_audio_samples_stats.max,
+            "median_time": wav_to_audio_samples_stats.median,
+            "std_dev": wav_to_audio_samples_stats.standard_deviation,
+            "throughput_bytes_per_sec": wav_to_audio_samples_stats.throughput,
+            "file_size_bytes": wav_to_audio_samples_stats.file_size,
+            "sample_count": wav_to_audio_samples_stats.sample_count
+        }),
     ]
 }
 
@@ -321,7 +406,7 @@ fn main() {
     let mut results = Vec::new();
 
     // Track progress
-    let total_benchmarks = 5 * DURATIONS.len() * SAMPLE_RATES.len() * N_CHANNELS.len() * 2; // *2 for read and write
+    let total_benchmarks = 5 * DURATIONS.len() * SAMPLE_RATES.len() * N_CHANNELS.len() * 3; // *3 for read, write, and wav_to_audio_samples
     let mut completed_benchmarks = 0;
 
     // Run benchmarks for each format, duration, sample rate, and channel count
@@ -344,12 +429,18 @@ fn main() {
 
                     println!("[{}/{}] ", completed_benchmarks + 1, total_benchmarks);
 
-                    let read_stats = benchmark_read::<i16>(*duration, sample_rate, n_channels);
+                    let read_stats = benchmark_read_audio_samples::<i16>(*duration, sample_rate, n_channels);
+                    completed_benchmarks += 1;
+
+                    println!("[{}/{}] ", completed_benchmarks + 1, total_benchmarks);
+
+                    let wav_to_audio_samples_stats = benchmark_wav_to_audio_samples::<i16>(*duration, sample_rate, n_channels);
                     completed_benchmarks += 1;
 
                     let json_stats = stats_to_json(
                         &write_stats,
                         &read_stats,
+                        &wav_to_audio_samples_stats,
                         "PCM_16",
                         duration.as_secs(),
                         sample_rate,
@@ -374,12 +465,18 @@ fn main() {
 
                     println!("[{}/{}] ", completed_benchmarks + 1, total_benchmarks);
 
-                    let read_stats = benchmark_read::<I24>(*duration, sample_rate, n_channels);
+                    let read_stats = benchmark_read_audio_samples::<I24>(*duration, sample_rate, n_channels);
+                    completed_benchmarks += 1;
+
+                    println!("[{}/{}] ", completed_benchmarks + 1, total_benchmarks);
+
+                    let wav_to_audio_samples_stats = benchmark_wav_to_audio_samples::<I24>(*duration, sample_rate, n_channels);
                     completed_benchmarks += 1;
 
                     let json_stats = stats_to_json(
                         &write_stats,
                         &read_stats,
+                        &wav_to_audio_samples_stats,
                         "PCM_24",
                         duration.as_secs(),
                         sample_rate,
@@ -404,12 +501,18 @@ fn main() {
 
                     println!("[{}/{}] ", completed_benchmarks + 1, total_benchmarks);
 
-                    let read_stats = benchmark_read::<i32>(*duration, sample_rate, n_channels);
+                    let read_stats = benchmark_read_audio_samples::<i32>(*duration, sample_rate, n_channels);
+                    completed_benchmarks += 1;
+
+                    println!("[{}/{}] ", completed_benchmarks + 1, total_benchmarks);
+
+                    let wav_to_audio_samples_stats = benchmark_wav_to_audio_samples::<i32>(*duration, sample_rate, n_channels);
                     completed_benchmarks += 1;
 
                     let json_stats = stats_to_json(
                         &write_stats,
                         &read_stats,
+                        &wav_to_audio_samples_stats,
                         "PCM_32",
                         duration.as_secs(),
                         sample_rate,
@@ -434,12 +537,18 @@ fn main() {
 
                     println!("[{}/{}] ", completed_benchmarks + 1, total_benchmarks);
 
-                    let read_stats = benchmark_read::<f32>(*duration, sample_rate, n_channels);
+                    let read_stats = benchmark_read_audio_samples::<f32>(*duration, sample_rate, n_channels);
+                    completed_benchmarks += 1;
+
+                    println!("[{}/{}] ", completed_benchmarks + 1, total_benchmarks);
+
+                    let wav_to_audio_samples_stats = benchmark_wav_to_audio_samples::<f32>(*duration, sample_rate, n_channels);
                     completed_benchmarks += 1;
 
                     let json_stats = stats_to_json(
                         &write_stats,
                         &read_stats,
+                        &wav_to_audio_samples_stats,
                         "IEEE_F32",
                         duration.as_secs(),
                         sample_rate,
@@ -464,12 +573,18 @@ fn main() {
 
                     println!("[{}/{}] ", completed_benchmarks + 1, total_benchmarks);
 
-                    let read_stats = benchmark_read::<f64>(*duration, sample_rate, n_channels);
+                    let read_stats = benchmark_read_audio_samples::<f64>(*duration, sample_rate, n_channels);
+                    completed_benchmarks += 1;
+
+                    println!("[{}/{}] ", completed_benchmarks + 1, total_benchmarks);
+
+                    let wav_to_audio_samples_stats = benchmark_wav_to_audio_samples::<f64>(*duration, sample_rate, n_channels);
                     completed_benchmarks += 1;
 
                     let json_stats = stats_to_json(
                         &write_stats,
                         &read_stats,
+                        &wav_to_audio_samples_stats,
                         "IEEE_F64",
                         duration.as_secs(),
                         sample_rate,

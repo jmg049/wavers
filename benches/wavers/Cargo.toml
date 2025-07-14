@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 wavers = { path = "../../" }
-audio_sample = { path = "/home/jmg/code/rust/audio_sample" }
+audio_samples = { path = "/home/jmg/code/rust/audio_samples" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rand = "0.9.1"

@@ -36,5 +36,5 @@ strip = true
 default = ["colored_output"]
 colored_output = ["dep:colored"]
 log = ["dep:log"]
-resample = []
+resample = ["audio_samples/resampling"]
 

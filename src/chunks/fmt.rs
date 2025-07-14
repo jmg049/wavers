@@ -21,8 +21,8 @@ use crate::{FormatCode, WaversErrorKind, WaversResult};
 
 use std::fmt::Display;
 
-use nom::number::complete::{i32, u16, u32};
 use nom::IResult;
+use nom::number::complete::{i32, u16, u32};
 
 /// GUID used for the extended format chunk
 const EXTENDED_FMT_GUID: [u8; 14] = *b"\x00\x00\x00\x00\x10\x00\x80\x00\x00\xAA\x00\x38\x9B\x71";
@@ -550,19 +550,25 @@ impl FmtChunk {
         // Validate block_align
         let expected_block_align = (self.channels * self.bits_per_sample) / 8;
         if self.block_align != expected_block_align {
-            return Err(WaversErrorKind::Validate(ValidationError::Chunk{chunk_id: FMT, reason: format!(
-                "Block align value inconsistent: expected {} (channels {} * bits_per_sample {} / 8), got {}",
-                expected_block_align, self.channels, self.bits_per_sample, self.block_align
-            )}));
+            return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                chunk_id: FMT,
+                reason: format!(
+                    "Block align value inconsistent: expected {} (channels {} * bits_per_sample {} / 8), got {}",
+                    expected_block_align, self.channels, self.bits_per_sample, self.block_align
+                ),
+            }));
         }
 
         // Validate byte_rate
         let expected_byte_rate = self.sample_rate * (self.block_align as i32);
         if self.byte_rate != expected_byte_rate {
-            return Err(WaversErrorKind::Validate(ValidationError::Chunk{chunk_id: FMT, reason:format!(
-                "Byte rate value inconsistent: expected {} (sample_rate {} * block_align {}), got {}",
-                expected_byte_rate, self.sample_rate, self.block_align, self.byte_rate
-            )}));
+            return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                chunk_id: FMT,
+                reason: format!(
+                    "Byte rate value inconsistent: expected {} (sample_rate {} * block_align {}), got {}",
+                    expected_byte_rate, self.sample_rate, self.block_align, self.byte_rate
+                ),
+            }));
         }
 
         // Validate extended format info if present
@@ -934,18 +940,24 @@ impl TryFrom<&[u8]> for FmtChunk {
         // Verify byte_rate and block_align for consistency
         let expected_block_align = (channels * bits_per_sample) / 8;
         if block_align != expected_block_align {
-            return Err(WaversErrorKind::Validate(ValidationError::Chunk{chunk_id: FMT, reason: format!(
-                "Block align value inconsistent: expected {} (channels {} * bits_per_sample {} / 8), got {}",
-                expected_block_align, channels, bits_per_sample, block_align
-            )}));
+            return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                chunk_id: FMT,
+                reason: format!(
+                    "Block align value inconsistent: expected {} (channels {} * bits_per_sample {} / 8), got {}",
+                    expected_block_align, channels, bits_per_sample, block_align
+                ),
+            }));
         }
 
         let expected_byte_rate = sample_rate * (block_align as i32);
         if byte_rate != expected_byte_rate {
-            return Err(WaversErrorKind::Validate(ValidationError::Chunk{chunk_id: FMT, reason: format!(
-                "Byte rate value inconsistent: expected {} (sample_rate {} * block_align {}), got {}",
-                expected_byte_rate, sample_rate, block_align, byte_rate
-            )}));
+            return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                chunk_id: FMT,
+                reason: format!(
+                    "Byte rate value inconsistent: expected {} (sample_rate {} * block_align {}), got {}",
+                    expected_byte_rate, sample_rate, block_align, byte_rate
+                ),
+            }));
         }
 
         // Parse extended format chunk if format is WaveFormatExtensible
@@ -954,10 +966,13 @@ impl TryFrom<&[u8]> for FmtChunk {
             FormatCode::WaveFormatExtensible => {
                 // Check if we have enough data for at least the cb_size field
                 if remaining.len() < 2 {
-                    return Err(WaversErrorKind::Validate(ValidationError::Chunk{chunk_id: FMT, reason: format!(
-                        "Extended format chunk data too small: expected at least 2 bytes for cb_size, got {} bytes",
-                        remaining.len()
-                    )}));
+                    return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                        chunk_id: FMT,
+                        reason: format!(
+                            "Extended format chunk data too small: expected at least 2 bytes for cb_size, got {} bytes",
+                            remaining.len()
+                        ),
+                    }));
                 }
 
                 // Peek at the cb_size value to determine expected data size
@@ -978,12 +993,15 @@ impl TryFrom<&[u8]> for FmtChunk {
 
                 // Verify remaining data size against expected size
                 if remaining.len() < expected_size {
-                    return Err(WaversErrorKind::Validate(ValidationError::Chunk{chunk_id: FMT, reason: format!(
-                        "Extended format chunk data too small: expected {} bytes for cb_size {}, got {} bytes",
-                        expected_size,
-                        cb_size_raw,
-                        remaining.len()
-                    )}));
+                    return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                        chunk_id: FMT,
+                        reason: format!(
+                            "Extended format chunk data too small: expected {} bytes for cb_size {}, got {} bytes",
+                            expected_size,
+                            cb_size_raw,
+                            remaining.len()
+                        ),
+                    }));
                 }
 
                 Some(ExtFmtChunkInfo::try_from(remaining)?)
@@ -1012,11 +1030,14 @@ impl TryFrom<&[u8]> for FmtChunk {
         };
 
         if chunk.len() as usize != expected_chunk_size {
-            return Err(WaversErrorKind::Validate(ValidationError::Chunk{chunk_id: FMT, reason: format!(
-                "Format chunk size mismatch: RIFF chunk indicates {} bytes, but format type requires {} bytes",
-                chunk.len(),
-                expected_chunk_size
-            )}));
+            return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                chunk_id: FMT,
+                reason: format!(
+                    "Format chunk size mismatch: RIFF chunk indicates {} bytes, but format type requires {} bytes",
+                    chunk.len(),
+                    expected_chunk_size
+                ),
+            }));
         }
 
         // Create and return the FmtChunk
@@ -1425,9 +1446,9 @@ impl ExtFmtChunkInfo {
                     return Err(WaversErrorKind::Validate(ValidationError::Chunk {
                         chunk_id: FMT,
                         reason: format!(
-                        "valid_bits_per_sample ({}) cannot be greater than bits_per_sample ({})",
-                        data.valid_bits_per_sample, bits_per_sample
-                    ),
+                            "valid_bits_per_sample ({}) cannot be greater than bits_per_sample ({})",
+                            data.valid_bits_per_sample, bits_per_sample
+                        ),
                     }));
                 }
             }
@@ -1499,9 +1520,9 @@ impl TryFrom<&[u8]> for ExtFmtChunkInfo {
                 return Err(WaversErrorKind::Validate(ValidationError::Chunk {
                     chunk_id: FMT,
                     reason: format!(
-                    "Invalid cb_size value {}: {}. Expected values are 0 (Base) or 22 (Extended)",
-                    cb_size_raw, e
-                ),
+                        "Invalid cb_size value {}: {}. Expected values are 0 (Base) or 22 (Extended)",
+                        cb_size_raw, e
+                    ),
                 }));
             }
         };
@@ -1512,10 +1533,13 @@ impl TryFrom<&[u8]> for ExtFmtChunkInfo {
             CbSize::Extended => {
                 // Validate we have enough data for the extended fields
                 if data.len() < 22 {
-                    return Err(WaversErrorKind::Validate(ValidationError::Chunk{chunk_id: FMT, reason: format!(
-                        "Extended format chunk data too small: expected 22 bytes for extended data, got {} bytes",
-                        data.len()
-                    )}));
+                    return Err(WaversErrorKind::Validate(ValidationError::Chunk {
+                        chunk_id: FMT,
+                        reason: format!(
+                            "Extended format chunk data too small: expected 22 bytes for extended data, got {} bytes",
+                            data.len()
+                        ),
+                    }));
                 }
 
                 // Parse valid bits per sample

@@ -1,5 +1,5 @@
 use super::{ChunkID, WAVE};
-use crate::{error::ValidationError, WaversErrorKind, WaversResult};
+use crate::{WaversErrorKind, WaversResult, error::ValidationError};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RIFFChunk {

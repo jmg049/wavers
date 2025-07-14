@@ -12,19 +12,21 @@
 //! - [`validate_tag`] and related helpers to ensure correctness when parsing.
 
 use crate::{
-    error::{OperationError, ValidationError},
     WaversErrorKind, WaversResult,
+    error::{OperationError, ValidationError},
 };
 use std::{
+    collections::HashMap,
     fmt::{Debug, Display},
     ops::Deref,
 };
 
 pub(crate) mod fmt;
-
+pub mod list;
 pub(crate) mod riff;
 
 pub(crate) use riff::RIFFChunk;
+pub use list::{ListChunk, SubChunk, WavMetadata};
 
 /// Standard RIFF chunk identifier
 pub const RIFF: ChunkID = ChunkID::new(*b"RIFF");
@@ -322,11 +324,7 @@ pub fn is_valid_chunk(chunk: &Chunk) -> bool {
 /// The aligned size
 pub fn align_chunk_size(size: u32) -> u32 {
     // If size is odd, add a padding byte
-    if size % 2 == 1 {
-        size + 1
-    } else {
-        size
-    }
+    if size % 2 == 1 { size + 1 } else { size }
 }
 
 /// Manager for WAV file chunks
@@ -337,6 +335,8 @@ pub fn align_chunk_size(size: u32) -> u32 {
 pub struct ChunkManager {
     /// The collection of chunks in the WAV file
     chunks: Vec<ChunkInfo>,
+    /// Parsed LIST chunks indexed by their offset
+    list_chunks: HashMap<usize, list::ListChunk>,
 }
 
 impl ChunkManager {
@@ -349,6 +349,7 @@ impl ChunkManager {
         Self {
             chunks: Vec::with_capacity(4), // Pre-allocate for a small set of wav chunks, RIFF,
                                            // FMT, DATA, EXTRA
+            list_chunks: HashMap::new(),
         }
     }
 
@@ -362,7 +363,10 @@ impl ChunkManager {
     ///
     /// A new ChunkManager containing the provided chunks
     pub fn with_chunks(chunks: Vec<ChunkInfo>) -> Self {
-        Self { chunks }
+        Self { 
+            chunks,
+            list_chunks: HashMap::new(),
+        }
     }
 
     /// Adds a chunk to the manager
@@ -430,6 +434,76 @@ impl ChunkManager {
     /// Clears all chunks from the manager
     pub fn clear(&mut self) {
         self.chunks.clear();
+        self.list_chunks.clear();
+    }
+
+    /// Adds a parsed LIST chunk to the manager
+    ///
+    /// # Arguments
+    /// * `offset` - The offset of the LIST chunk in the file
+    /// * `list_chunk` - The parsed LIST chunk
+    pub fn add_list_chunk(&mut self, offset: usize, list_chunk: list::ListChunk) {
+        self.list_chunks.insert(offset, list_chunk);
+    }
+
+    /// Gets a LIST chunk by its offset
+    ///
+    /// # Arguments
+    /// * `offset` - The offset of the LIST chunk in the file
+    ///
+    /// # Returns
+    /// A reference to the LIST chunk if found
+    pub fn get_list_chunk(&self, offset: usize) -> Option<&list::ListChunk> {
+        self.list_chunks.get(&offset)
+    }
+
+    /// Gets all LIST chunks
+    ///
+    /// # Returns
+    /// An iterator over all LIST chunks with their offsets
+    pub fn list_chunks(&self) -> impl Iterator<Item = (usize, &list::ListChunk)> {
+        self.list_chunks.iter().map(|(k, v)| (*k, v))
+    }
+
+    /// Gets all INFO LIST chunks
+    ///
+    /// # Returns
+    /// An iterator over INFO LIST chunks with their offsets
+    pub fn info_chunks(&self) -> impl Iterator<Item = (usize, &list::ListChunk)> {
+        self.list_chunks.iter()
+            .filter(|(_, chunk)| chunk.is_info())
+            .map(|(k, v)| (*k, v))
+    }
+
+    /// Extracts metadata from all INFO LIST chunks
+    ///
+    /// # Returns
+    /// A merged metadata structure from all INFO chunks
+    pub fn extract_metadata(&self) -> WaversResult<list::WavMetadata> {
+        let mut combined_metadata = list::WavMetadata::default();
+        
+        for (_, list_chunk) in self.info_chunks() {
+            let metadata = list_chunk.extract_metadata()?;
+            
+            // Merge metadata, preferring non-None values
+            if combined_metadata.artist.is_none() { combined_metadata.artist = metadata.artist; }
+            if combined_metadata.title.is_none() { combined_metadata.title = metadata.title; }
+            if combined_metadata.copyright.is_none() { combined_metadata.copyright = metadata.copyright; }
+            if combined_metadata.comment.is_none() { combined_metadata.comment = metadata.comment; }
+            if combined_metadata.creation_date.is_none() { combined_metadata.creation_date = metadata.creation_date; }
+            if combined_metadata.engineer.is_none() { combined_metadata.engineer = metadata.engineer; }
+            if combined_metadata.genre.is_none() { combined_metadata.genre = metadata.genre; }
+            if combined_metadata.keywords.is_none() { combined_metadata.keywords = metadata.keywords; }
+            if combined_metadata.medium.is_none() { combined_metadata.medium = metadata.medium; }
+            if combined_metadata.product.is_none() { combined_metadata.product = metadata.product; }
+            if combined_metadata.subject.is_none() { combined_metadata.subject = metadata.subject; }
+            if combined_metadata.software.is_none() { combined_metadata.software = metadata.software; }
+            if combined_metadata.source.is_none() { combined_metadata.source = metadata.source; }
+            if combined_metadata.source_form.is_none() { combined_metadata.source_form = metadata.source_form; }
+            if combined_metadata.technician.is_none() { combined_metadata.technician = metadata.technician; }
+        }
+        
+        Ok(combined_metadata)
     }
 
     pub fn get_start(&self) -> WaversResult<usize> {

@@ -3,19 +3,21 @@ use crate::error::InternalError;
 use crate::{FormatCode, ReadSeek, WavIterators};
 use crate::{WaversErrorKind, WaversResult, wav_type::WavType};
 
-use audio_samples::{AudioSample, ConvertTo, I24, AudioSamples, AudioStatistics, AudioProcessing, AudioTransforms, NormalizationMethod, AudioEditing};
 use audio_samples::operations::FadeCurve;
-use num_complex::Complex;
-use ndarray::Array2;
+use audio_samples::{
+    AudioEditing, AudioProcessing, AudioSample, AudioSamples, AudioStatistics, AudioTransforms,
+    ConvertTo, I24, NormalizationMethod,
+};
 use i24::I24DiskMethods;
-
+use ndarray::Array2;
+use num_complex::Complex;
 
 use std::any::{TypeId, type_name};
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::fs::File;
 use std::io::BufReader;
 use std::{alloc::Layout, path::Path};
-use std::collections::HashMap;
 
 /// Represents a WAV file loaded from any readable and seekable source.
 pub struct Wav<R: ReadSeek> {
@@ -128,6 +130,31 @@ impl<R: ReadSeek> Wav<R> {
         Self::new(reader)
     }
 
+    /// Creates a WAV reader from a byte slice.
+    ///
+    /// This is a convenience method for reading WAV data that's already in memory.
+    ///
+    /// # Arguments
+    /// - `bytes`: Byte slice containing WAV file data.
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use wavers::Wav;
+    ///
+    /// fn main() -> wavers::WaversResult<()> {
+    ///     let wav_data: &[u8] = &[/* WAV file bytes */];
+    ///     let mut wav = Wav::from_bytes(wav_data)?;
+    ///     
+    ///     let samples = wav.read::<f32>()?;
+    ///     println!("Read {} samples", samples.len());
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn from_bytes(bytes: &[u8]) -> WaversResult<Wav<std::io::Cursor<&[u8]>>> {
+        let cursor = std::io::Cursor::new(bytes);
+        Wav::from_reader(cursor)
+    }
+
     pub fn fmt_chunk(&mut self) -> &FmtChunk {
         &self.fmt_chunk
     }
@@ -165,7 +192,7 @@ impl<R: ReadSeek> Wav<R> {
     }
 
     /// Reads all samples in the data chunk and converts them into an [ndarray::Array2] and the sample rate.
-    /// 
+    ///
     /// This method now uses AudioSamples internally for better performance and consistency.
     /// The ndarray is in the shape of (n_channels, n_samples).
     pub fn read_ndarray<T: AudioSample>(&mut self) -> WaversResult<(ndarray::Array2<T>, i32)>
@@ -179,16 +206,20 @@ impl<R: ReadSeek> Wav<R> {
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         let sample_rate = audio_samples.sample_rate() as i32;
-        
+
         // Extract ndarray efficiently from AudioSamples
         let array = if audio_samples.is_mono() {
             // Convert mono to 2D array with shape (1, samples)
-            audio_samples.as_mono().unwrap().clone().insert_axis(ndarray::Axis(0))
+            audio_samples
+                .as_mono()
+                .unwrap()
+                .clone()
+                .insert_axis(ndarray::Axis(0))
         } else {
             // Multi-channel is already in the right shape
             audio_samples.as_multi_channel().unwrap().clone()
         };
-        
+
         Ok((array, sample_rate))
     }
 
@@ -281,7 +312,10 @@ impl<R: ReadSeek> Wav<R> {
             WavType::Pcm16 | WavType::EPcm16 => {
                 let boxed_data = transmute_box::<i16>(raw, bytes_to_read);
                 // Convert i16 samples to target type T
-                let converted: Vec<T> = boxed_data.iter().map(|&sample| sample.convert_to().unwrap()).collect();
+                let converted: Vec<T> = boxed_data
+                    .iter()
+                    .map(|&sample| sample.convert_to().unwrap())
+                    .collect();
                 Ok(converted.into_boxed_slice())
             }
             WavType::Pcm24 | WavType::EPcm24 => {
@@ -294,25 +328,37 @@ impl<R: ReadSeek> Wav<R> {
                     }
                 };
                 // Convert I24 samples to target type T
-                let converted: Vec<T> = boxed_data.iter().map(|&sample| sample.convert_to().unwrap()).collect();
+                let converted: Vec<T> = boxed_data
+                    .iter()
+                    .map(|&sample| sample.convert_to().unwrap())
+                    .collect();
                 Ok(converted.into_boxed_slice())
             }
             WavType::Pcm32 | WavType::EPcm32 => {
                 let boxed_data = transmute_box::<i32>(raw, bytes_to_read);
                 // Convert i32 samples to target type T
-                let converted: Vec<T> = boxed_data.iter().map(|&sample| sample.convert_to().unwrap()).collect();
+                let converted: Vec<T> = boxed_data
+                    .iter()
+                    .map(|&sample| sample.convert_to().unwrap())
+                    .collect();
                 Ok(converted.into_boxed_slice())
             }
             WavType::Float32 | WavType::EFloat32 => {
                 let boxed_data = transmute_box::<f32>(raw, bytes_to_read);
                 // Convert f32 samples to target type T
-                let converted: Vec<T> = boxed_data.iter().map(|&sample| sample.convert_to().unwrap()).collect();
+                let converted: Vec<T> = boxed_data
+                    .iter()
+                    .map(|&sample| sample.convert_to().unwrap())
+                    .collect();
                 Ok(converted.into_boxed_slice())
             }
             WavType::Float64 | WavType::EFloat64 => {
                 let boxed_data = transmute_box::<f64>(raw, bytes_to_read);
                 // Convert f64 samples to target type T
-                let converted: Vec<T> = boxed_data.iter().map(|&sample| sample.convert_to().unwrap()).collect();
+                let converted: Vec<T> = boxed_data
+                    .iter()
+                    .map(|&sample| sample.convert_to().unwrap())
+                    .collect();
                 Ok(converted.into_boxed_slice())
             }
             _ => {
@@ -380,22 +426,68 @@ impl<R: ReadSeek> Wav<R> {
         }
     }
 
+    /// Extracts metadata from INFO LIST chunks in the WAV file.
+    ///
+    /// # Returns
+    /// A WavMetadata struct containing metadata from all INFO LIST chunks,
+    /// or None if no INFO chunks are present.
+    pub fn metadata(&self) -> WaversResult<Option<crate::chunks::WavMetadata>> {
+        let metadata = self.chunk_info.extract_metadata()?;
+        
+        // Check if any metadata fields are populated
+        if metadata.artist.is_some() || 
+           metadata.title.is_some() || 
+           metadata.copyright.is_some() ||
+           metadata.comment.is_some() ||
+           metadata.creation_date.is_some() ||
+           metadata.engineer.is_some() ||
+           metadata.genre.is_some() ||
+           metadata.keywords.is_some() ||
+           metadata.medium.is_some() ||
+           metadata.product.is_some() ||
+           metadata.subject.is_some() ||
+           metadata.software.is_some() ||
+           metadata.source.is_some() ||
+           metadata.source_form.is_some() ||
+           metadata.technician.is_some() {
+            Ok(Some(metadata))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Gets all LIST chunks in the WAV file.
+    ///
+    /// # Returns
+    /// An iterator over all LIST chunks with their file offsets.
+    pub fn list_chunks(&self) -> impl Iterator<Item = (usize, &crate::chunks::ListChunk)> {
+        self.chunk_info.list_chunks()
+    }
+
+    /// Gets all INFO LIST chunks in the WAV file.
+    ///
+    /// # Returns
+    /// An iterator over INFO LIST chunks with their file offsets.
+    pub fn info_chunks(&self) -> impl Iterator<Item = (usize, &crate::chunks::ListChunk)> {
+        self.chunk_info.info_chunks()
+    }
+
     /// Reads all audio data and returns AudioSamples with metadata.
-    /// 
+    ///
     /// This is the recommended method for reading audio data as it provides rich metadata
     /// and access to audio processing operations from the audio_samples crate.
-    /// 
+    ///
     /// Performance optimizations:
     /// - Caches converted data by type to avoid re-reading WAV data
     /// - Optimized mono path that avoids unnecessary 2D array creation
     /// - Minimizes memory allocations and copying
-    /// 
+    ///
     /// # Example
     /// ```rust,no_run
     /// use wavers::Wav;
     /// use std::fs::File;
     /// use std::io::BufReader;
-    /// 
+    ///
     /// fn main() -> wavers::WaversResult<()> {
     ///     let mut wav = Wav::from_path("audio.wav")?;
     ///     let audio = wav.read_audio::<f32>()?;
@@ -418,10 +510,10 @@ impl<R: ReadSeek> Wav<R> {
     }
 
     /// Converts WAV data to AudioSamples for advanced processing with caching.
-    /// 
-    /// This optimized bridge method caches converted AudioSamples to avoid 
+    ///
+    /// This optimized bridge method caches converted AudioSamples to avoid
     /// redundant conversions when performing multiple operations on the same data.
-    /// 
+    ///
     /// Performance optimizations:
     /// - Caches converted data by type to avoid re-reading WAV data
     /// - Optimized mono path that avoids unnecessary 2D array creation
@@ -436,20 +528,21 @@ impl<R: ReadSeek> Wav<R> {
         T: Clone + 'static,
     {
         let type_id = TypeId::of::<T>();
-        
+
         // Check cache first
         if let Some(cached) = self.audio_samples_cache.get(&type_id) {
             if let Some(audio_samples) = cached.downcast_ref::<AudioSamples<T>>() {
                 return Ok(audio_samples.clone());
             }
         }
-        
+
         // Cache miss - convert and cache the result
         let audio_samples = self.to_audio_samples_uncached::<T>()?;
-        
+
         // Cache the result for future use
-        self.audio_samples_cache.insert(type_id, Box::new(audio_samples.clone()));
-        
+        self.audio_samples_cache
+            .insert(type_id, Box::new(audio_samples.clone()));
+
         Ok(audio_samples)
     }
 
@@ -465,27 +558,32 @@ impl<R: ReadSeek> Wav<R> {
         let samples = self.read::<T>()?;
         let channels = self.fmt_chunk.channels as usize;
         let sample_rate = self.fmt_chunk.sample_rate as u32;
-        
+
         // Performance optimization: handle mono case efficiently without unnecessary reshaping
         if channels == 1 {
             let samples_vec: Vec<T> = samples.into_vec();
             let mono_array = ndarray::Array1::from_vec(samples_vec);
             return Ok(AudioSamples::new_mono(mono_array, sample_rate));
         }
-        
+
         // Multi-channel case
         let samples_vec: Vec<T> = samples.into_vec();
         let samples_per_channel = samples_vec.len() / channels;
-        
+
         // Create ndarray with shape (channels, samples_per_channel)
         let array = ndarray::Array2::from_shape_vec((channels, samples_per_channel), samples_vec)
-            .map_err(|e| WaversErrorKind::Internal(InternalError::Bug(format!("Failed to create ndarray: {}", e))))?;
-        
+            .map_err(|e| {
+            WaversErrorKind::Internal(InternalError::Bug(format!(
+                "Failed to create ndarray: {}",
+                e
+            )))
+        })?;
+
         Ok(AudioSamples::new_multi_channel(array, sample_rate))
     }
 
     /// Clears the AudioSamples cache to free memory.
-    /// 
+    ///
     /// Call this method when you're done with audio processing operations
     /// to reclaim memory used by cached conversions.
     pub fn clear_audio_cache(&mut self) {
@@ -493,20 +591,20 @@ impl<R: ReadSeek> Wav<R> {
     }
 
     /// Returns the number of cached AudioSamples conversions.
-    /// 
+    ///
     /// Useful for monitoring cache usage and memory consumption.
     pub fn cache_size(&self) -> usize {
         self.audio_samples_cache.len()
     }
 
     /// Batch operation for efficient chaining of multiple audio processing operations.
-    /// 
+    ///
     /// This method applies a series of operations to the same AudioSamples instance,
     /// avoiding the overhead of multiple conversions and cache lookups.
-    /// 
+    ///
     /// # Arguments
     /// * `operations` - A closure that takes a mutable AudioSamples reference and performs operations
-    /// 
+    ///
     /// # Example
     /// ```rust,ignore
     /// // Efficiently chain multiple operations
@@ -526,20 +624,25 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let mut audio_samples = self.to_audio_samples::<T>()?;
         let result = operations(&mut audio_samples)?;
-        
+
         // Update cache with modified audio samples
         let type_id = TypeId::of::<T>();
-        self.audio_samples_cache.insert(type_id, Box::new(audio_samples));
-        
+        self.audio_samples_cache
+            .insert(type_id, Box::new(audio_samples));
+
         Ok(result)
     }
 
     /// Computes the Root Mean Square (RMS) of the audio samples.
-    /// 
+    ///
     /// RMS is useful for measuring average signal power/energy and provides
     /// a perceptually relevant measure of loudness.
     pub fn rms<T: AudioSample>(&mut self) -> WaversResult<T>
@@ -549,14 +652,18 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         Ok(audio_samples.rms())
     }
 
     /// Returns the peak (maximum absolute value) in the audio samples.
-    /// 
+    ///
     /// This is useful for preventing clipping and measuring signal levels.
     pub fn peak<T: AudioSample>(&mut self) -> WaversResult<T>
     where
@@ -565,14 +672,18 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         Ok(audio_samples.peak())
     }
 
     /// Counts the number of zero crossings in the audio signal.
-    /// 
+    ///
     /// Zero crossings are useful for pitch detection and signal analysis.
     /// The count represents transitions from positive to negative values or vice versa.
     pub fn zero_crossings<T: AudioSample>(&mut self) -> WaversResult<usize>
@@ -582,14 +693,18 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         Ok(audio_samples.zero_crossings())
     }
 
     /// Computes the zero crossing rate (crossings per second).
-    /// 
+    ///
     /// This normalizes the zero crossing count by the signal duration,
     /// making it independent of audio length.
     pub fn zero_crossing_rate<T: AudioSample>(&mut self) -> WaversResult<f64>
@@ -599,14 +714,18 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         Ok(audio_samples.zero_crossing_rate())
     }
 
     /// Computes the spectral centroid (brightness measure).
-    /// 
+    ///
     /// The spectral centroid represents the "center of mass" of the spectrum
     /// and is often used as a measure of brightness or timbre.
     pub fn spectral_centroid<T: AudioSample>(&mut self) -> WaversResult<f64>
@@ -616,14 +735,20 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
-        audio_samples.spectral_centroid().map_err(|e| WaversErrorKind::SampleError(e))
+        audio_samples
+            .spectral_centroid()
+            .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     /// Computes spectral rolloff frequency.
-    /// 
+    ///
     /// The rolloff frequency is the frequency below which a specified percentage
     /// of the total spectral energy is contained.
     pub fn spectral_rolloff<T: AudioSample>(&mut self, rolloff_percent: f64) -> WaversResult<f64>
@@ -633,31 +758,49 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
-        audio_samples.spectral_rolloff(rolloff_percent).map_err(|e| WaversErrorKind::SampleError(e))
+        audio_samples
+            .spectral_rolloff(rolloff_percent)
+            .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     /// Normalizes audio samples using the specified method and range.
-    /// 
+    ///
     /// Note: This method modifies the WAV file's audio data in memory.
     /// To persist changes, you'll need to write the modified audio to a new file.
-    pub fn normalize<T: AudioSample>(&mut self, min: T, max: T, method: NormalizationMethod) -> WaversResult<()>
+    pub fn normalize<T: AudioSample>(
+        &mut self,
+        min: T,
+        max: T,
+        method: NormalizationMethod,
+    ) -> WaversResult<()>
     where
         i16: ConvertTo<T>,
         I24: ConvertTo<T>,
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Zero + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Zero
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let mut audio_samples = self.to_audio_samples::<T>()?;
-        audio_samples.normalize(min, max, method).map_err(|e| WaversErrorKind::SampleError(e))
+        audio_samples
+            .normalize(min, max, method)
+            .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     /// Scales all audio samples by a constant factor.
-    /// 
+    ///
     /// This is equivalent to adjusting the volume/amplitude of the signal.
     /// Note: This method modifies the WAV file's audio data in memory.
     pub fn scale<T: AudioSample>(&mut self, factor: T) -> WaversResult<()>
@@ -667,14 +810,21 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Zero + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Zero
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let mut audio_samples = self.to_audio_samples::<T>()?;
-        audio_samples.scale(factor).map_err(|e| WaversErrorKind::SampleError(e))
+        audio_samples
+            .scale(factor)
+            .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     /// Removes DC offset by subtracting the mean value.
-    /// 
+    ///
     /// This centers the audio around zero and removes any constant bias.
     /// Note: This method modifies the WAV file's audio data in memory.
     pub fn remove_dc_offset<T: AudioSample>(&mut self) -> WaversResult<()>
@@ -684,14 +834,21 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Zero + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Zero
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let mut audio_samples = self.to_audio_samples::<T>()?;
-        audio_samples.remove_dc_offset().map_err(|e| WaversErrorKind::SampleError(e))
+        audio_samples
+            .remove_dc_offset()
+            .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     /// Clips audio samples to the specified range.
-    /// 
+    ///
     /// Any samples outside the range will be limited to the range boundaries.
     /// This is useful for preventing clipping in subsequent processing.
     /// Note: This method modifies the WAV file's audio data in memory.
@@ -702,14 +859,21 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Zero + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Zero
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let mut audio_samples = self.to_audio_samples::<T>()?;
-        audio_samples.clip(min_val, max_val).map_err(|e| WaversErrorKind::SampleError(e))
+        audio_samples
+            .clip(min_val, max_val)
+            .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     /// Applies a low-pass filter with the specified cutoff frequency.
-    /// 
+    ///
     /// Frequencies above the cutoff will be attenuated.
     /// Note: This method modifies the WAV file's audio data in memory.
     pub fn low_pass_filter<T: AudioSample>(&mut self, cutoff_hz: f64) -> WaversResult<()>
@@ -719,14 +883,21 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Zero + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Zero
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let mut audio_samples = self.to_audio_samples::<T>()?;
-        audio_samples.low_pass_filter(cutoff_hz).map_err(|e| WaversErrorKind::SampleError(e))
+        audio_samples
+            .low_pass_filter(cutoff_hz)
+            .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     /// Applies a high-pass filter with the specified cutoff frequency.
-    /// 
+    ///
     /// Frequencies below the cutoff will be attenuated.
     /// Note: This method modifies the WAV file's audio data in memory.
     pub fn high_pass_filter<T: AudioSample>(&mut self, cutoff_hz: f64) -> WaversResult<()>
@@ -736,31 +907,49 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Zero + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Zero
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let mut audio_samples = self.to_audio_samples::<T>()?;
-        audio_samples.high_pass_filter(cutoff_hz).map_err(|e| WaversErrorKind::SampleError(e))
+        audio_samples
+            .high_pass_filter(cutoff_hz)
+            .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     /// Applies a band-pass filter between low and high frequencies.
-    /// 
+    ///
     /// Only frequencies within the specified range will pass through.
     /// Note: This method modifies the WAV file's audio data in memory.
-    pub fn band_pass_filter<T: AudioSample>(&mut self, low_hz: f64, high_hz: f64) -> WaversResult<()>
+    pub fn band_pass_filter<T: AudioSample>(
+        &mut self,
+        low_hz: f64,
+        high_hz: f64,
+    ) -> WaversResult<()>
     where
         i16: ConvertTo<T>,
         I24: ConvertTo<T>,
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Zero + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Zero
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let mut audio_samples = self.to_audio_samples::<T>()?;
-        audio_samples.band_pass_filter(low_hz, high_hz).map_err(|e| WaversErrorKind::SampleError(e))
+        audio_samples
+            .band_pass_filter(low_hz, high_hz)
+            .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     /// Computes the Fast Fourier Transform of the audio samples.
-    /// 
+    ///
     /// Returns complex frequency domain representation where the real and
     /// imaginary parts represent the magnitude and phase at each frequency bin.
     pub fn fft<T: AudioSample>(&mut self) -> WaversResult<Vec<Complex<f64>>>
@@ -770,14 +959,20 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
-        audio_samples.fft().map_err(|e| WaversErrorKind::SampleError(e))
+        audio_samples
+            .fft()
+            .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     /// Computes mel-scaled spectrogram for perceptual analysis.
-    /// 
+    ///
     /// The mel scale better represents human auditory perception
     /// and is commonly used in speech and music analysis.
     pub fn mel_spectrogram<T: AudioSample>(
@@ -794,15 +989,20 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
-        audio_samples.mel_spectrogram(n_mels, fmin, fmax, window_size, hop_size)
+        audio_samples
+            .mel_spectrogram(n_mels, fmin, fmax, window_size, hop_size)
             .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     /// Computes Mel-Frequency Cepstral Coefficients (MFCC).
-    /// 
+    ///
     /// MFCCs are commonly used features in speech recognition and audio analysis.
     /// They provide a compact representation of spectral characteristics.
     pub fn mfcc<T: AudioSample>(
@@ -818,15 +1018,20 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
-        audio_samples.mfcc(n_mfcc, n_mels, fmin, fmax)
+        audio_samples
+            .mfcc(n_mfcc, n_mels, fmin, fmax)
             .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     /// Computes chromagram (pitch class profile).
-    /// 
+    ///
     /// Useful for music analysis and chord detection by representing
     /// the energy in each of the 12 pitch classes (C, C#, D, etc.).
     pub fn chroma<T: AudioSample>(&mut self, n_chroma: usize) -> WaversResult<Array2<f64>>
@@ -836,14 +1041,20 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
-        audio_samples.chroma(n_chroma).map_err(|e| WaversErrorKind::SampleError(e))
+        audio_samples
+            .chroma(n_chroma)
+            .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     /// Computes the power spectral density using Welch's method.
-    /// 
+    ///
     /// Returns both the frequency bins and corresponding power values.
     /// Welch's method provides better noise reduction than a single FFT.
     pub fn power_spectral_density<T: AudioSample>(
@@ -857,17 +1068,22 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
-        audio_samples.power_spectral_density(window_size, overlap)
+        audio_samples
+            .power_spectral_density(window_size, overlap)
             .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     // ===== TIME-DOMAIN EDITING OPERATIONS =====
 
     /// Reverses the order of audio samples.
-    /// 
+    ///
     /// Creates a new AudioSamples instance with time-reversed content.
     /// Note: This returns new audio data and doesn't modify the original WAV.
     pub fn reverse<T: AudioSample>(&mut self) -> WaversResult<AudioSamples<T>>
@@ -877,36 +1093,49 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         Ok(audio_samples.reverse())
     }
 
     /// Extracts a segment of audio between start and end times.
-    /// 
+    ///
     /// # Arguments
     /// * `start_seconds` - Start time in seconds
     /// * `end_seconds` - End time in seconds
-    /// 
+    ///
     /// # Errors
     /// Returns an error if start >= end or if times are out of bounds.
-    pub fn trim<T: AudioSample>(&mut self, start_seconds: f64, end_seconds: f64) -> WaversResult<AudioSamples<T>>
+    pub fn trim<T: AudioSample>(
+        &mut self,
+        start_seconds: f64,
+        end_seconds: f64,
+    ) -> WaversResult<AudioSamples<T>>
     where
         i16: ConvertTo<T>,
         I24: ConvertTo<T>,
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
-        audio_samples.trim(start_seconds, end_seconds)
+        audio_samples
+            .trim(start_seconds, end_seconds)
             .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     /// Adds padding/silence to the beginning and/or end of the audio.
-    /// 
+    ///
     /// # Arguments
     /// * `pad_start_seconds` - Duration to pad at the beginning
     /// * `pad_end_seconds` - Duration to pad at the end
@@ -923,35 +1152,48 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
-        audio_samples.pad(pad_start_seconds, pad_end_seconds, pad_value)
+        audio_samples
+            .pad(pad_start_seconds, pad_end_seconds, pad_value)
             .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     /// Splits audio into segments of specified duration.
-    /// 
+    ///
     /// The last segment may be shorter if the audio doesn't divide evenly.
-    /// 
+    ///
     /// # Arguments
     /// * `segment_duration_seconds` - Duration of each segment
-    pub fn split<T: AudioSample>(&mut self, segment_duration_seconds: f64) -> WaversResult<Vec<AudioSamples<T>>>
+    pub fn split<T: AudioSample>(
+        &mut self,
+        segment_duration_seconds: f64,
+    ) -> WaversResult<Vec<AudioSamples<T>>>
     where
         i16: ConvertTo<T>,
         I24: ConvertTo<T>,
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
-        audio_samples.split(segment_duration_seconds)
+        audio_samples
+            .split(segment_duration_seconds)
             .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     /// Repeats the audio signal a specified number of times.
-    /// 
+    ///
     /// # Arguments
     /// * `count` - Number of repetitions (total length = original × count)
     pub fn repeat<T: AudioSample>(&mut self, count: usize) -> WaversResult<AudioSamples<T>>
@@ -961,15 +1203,20 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
-        audio_samples.repeat(count)
+        audio_samples
+            .repeat(count)
             .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     /// Crops audio to remove silence from beginning and end.
-    /// 
+    ///
     /// # Arguments
     /// * `threshold` - Amplitude threshold below which samples are considered silence
     pub fn trim_silence<T: AudioSample>(&mut self, threshold: T) -> WaversResult<AudioSamples<T>>
@@ -979,49 +1226,72 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
-        audio_samples.trim_silence(threshold)
+        audio_samples
+            .trim_silence(threshold)
             .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     /// Creates an AudioSamples instance and applies fade-in envelope.
-    /// 
+    ///
     /// # Arguments
     /// * `duration_seconds` - Duration of the fade-in
     /// * `curve` - Shape of the fade curve
-    pub fn fade_in<T: AudioSample>(&mut self, duration_seconds: f64, curve: FadeCurve) -> WaversResult<AudioSamples<T>>
+    pub fn fade_in<T: AudioSample>(
+        &mut self,
+        duration_seconds: f64,
+        curve: FadeCurve,
+    ) -> WaversResult<AudioSamples<T>>
     where
         i16: ConvertTo<T>,
         I24: ConvertTo<T>,
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let mut audio_samples = self.to_audio_samples::<T>()?;
-        audio_samples.fade_in(duration_seconds, curve)
+        audio_samples
+            .fade_in(duration_seconds, curve)
             .map_err(|e| WaversErrorKind::SampleError(e))?;
         Ok(audio_samples)
     }
 
     /// Creates an AudioSamples instance and applies fade-out envelope.
-    /// 
+    ///
     /// # Arguments
     /// * `duration_seconds` - Duration of the fade-out
     /// * `curve` - Shape of the fade curve
-    pub fn fade_out<T: AudioSample>(&mut self, duration_seconds: f64, curve: FadeCurve) -> WaversResult<AudioSamples<T>>
+    pub fn fade_out<T: AudioSample>(
+        &mut self,
+        duration_seconds: f64,
+        curve: FadeCurve,
+    ) -> WaversResult<AudioSamples<T>>
     where
         i16: ConvertTo<T>,
         I24: ConvertTo<T>,
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
         let mut audio_samples = self.to_audio_samples::<T>()?;
-        audio_samples.fade_out(duration_seconds, curve)
+        audio_samples
+            .fade_out(duration_seconds, curve)
             .map_err(|e| WaversErrorKind::SampleError(e))?;
         Ok(audio_samples)
     }
@@ -1030,40 +1300,125 @@ impl<R: ReadSeek> Wav<R> {
     // These operations work on multiple AudioSamples instances
 
     /// Concatenates multiple AudioSamples into one.
-    /// 
+    ///
     /// All segments must have the same sample rate and channel configuration.
     /// Note: This is a static method that doesn't require a WAV instance.
-    /// 
+    ///
     /// # Arguments
     /// * `segments` - Audio segments to concatenate in order
-    pub fn concatenate_audio_samples<T: AudioSample>(segments: &[AudioSamples<T>]) -> WaversResult<AudioSamples<T>>
+    pub fn concatenate_audio_samples<T: AudioSample>(
+        segments: &[AudioSamples<T>],
+    ) -> WaversResult<AudioSamples<T>>
     where
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
-        AudioSamples::concatenate(segments)
-            .map_err(|e| WaversErrorKind::SampleError(e))
+        AudioSamples::concatenate(segments).map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     /// Mixes multiple AudioSamples together.
-    /// 
+    ///
     /// Sources must have the same sample rate, channel count, and length.
     /// Optional weights can be provided for each source.
     /// Note: This is a static method that doesn't require a WAV instance.
-    /// 
+    ///
     /// # Arguments
     /// * `sources` - Audio sources to mix
     /// * `weights` - Optional mixing weights (defaults to equal weighting)
-    pub fn mix_audio_samples<T: AudioSample>(sources: &[AudioSamples<T>], weights: Option<&[f64]>) -> WaversResult<AudioSamples<T>>
+    pub fn mix_audio_samples<T: AudioSample>(
+        sources: &[AudioSamples<T>],
+        weights: Option<&[f64]>,
+    ) -> WaversResult<AudioSamples<T>>
     where
-        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Float + Clone + 'static,
+        T: num_traits::ToPrimitive
+            + num_traits::FromPrimitive
+            + num_traits::Float
+            + Clone
+            + 'static,
     {
-        AudioSamples::mix(sources, weights)
+        AudioSamples::mix(sources, weights).map_err(|e| WaversErrorKind::SampleError(e))
+    }
+
+    // ===== RESAMPLING OPERATIONS =====
+    // Wrapper methods for audio_samples resampling functionality
+
+    /// Resamples audio to a new sample rate using high-quality algorithms.
+    ///
+    /// This method provides a convenient interface to rubato's resampling capabilities
+    /// with different quality/performance trade-offs.
+    ///
+    /// # Arguments
+    /// * `target_sample_rate` - Desired output sample rate in Hz
+    /// * `quality` - Quality/performance trade-off setting
+    ///
+    /// # Returns
+    /// A new AudioSamples instance with the target sample rate
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - The resampling feature is not enabled
+    /// - The resampling parameters are invalid
+    /// - The input audio is empty
+    /// - Rubato encounters an internal error
+    pub fn resample<T: AudioSample>(
+        &mut self,
+        target_sample_rate: usize,
+        quality: audio_samples::operations::types::ResamplingQuality,
+    ) -> WaversResult<AudioSamples<T>>
+    where
+        i16: ConvertTo<T>,
+        I24: ConvertTo<T>,
+        i32: ConvertTo<T>,
+        f32: ConvertTo<T>,
+        f64: ConvertTo<T>,
+        T: num_traits::Float + num_traits::FromPrimitive + num_traits::ToPrimitive + Clone + 'static,
+    {
+        let audio_samples = self.to_audio_samples::<T>()?;
+        audio_samples
+            .resample(target_sample_rate, quality)
             .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
-    // NOTE: Channel operations (AudioChannelOps trait) are not yet implemented 
+    /// Resamples audio by a specific ratio.
+    ///
+    /// # Arguments
+    /// * `ratio` - Resampling ratio (output_rate / input_rate)
+    /// * `quality` - Quality/performance trade-off setting
+    ///
+    /// # Returns
+    /// A new AudioSamples instance resampled by the given ratio
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - The resampling feature is not enabled
+    /// - The ratio is invalid (≤ 0)
+    /// - The input audio is empty
+    /// - Rubato encounters an internal error
+    pub fn resample_by_ratio<T: AudioSample>(
+        &mut self,
+        ratio: f64,
+        quality: audio_samples::operations::types::ResamplingQuality,
+    ) -> WaversResult<AudioSamples<T>>
+    where
+        i16: ConvertTo<T>,
+        I24: ConvertTo<T>,
+        i32: ConvertTo<T>,
+        f32: ConvertTo<T>,
+        f64: ConvertTo<T>,
+        T: num_traits::Float + num_traits::FromPrimitive + num_traits::ToPrimitive + Clone + 'static,
+    {
+        let audio_samples = self.to_audio_samples::<T>()?;
+        audio_samples
+            .resample_by_ratio(ratio, quality)
+            .map_err(|e| WaversErrorKind::SampleError(e))
+    }
+
+    // NOTE: Channel operations (AudioChannelOps trait) are not yet implemented
     // in the audio_samples crate, so they cannot be integrated at this time.
-    // This includes: to_mono, to_stereo, to_channels, extract_channel, 
+    // This includes: to_mono, to_stereo, to_channels, extract_channel,
     // swap_channels, pan, and balance operations.
 }
 
@@ -1209,9 +1564,31 @@ fn find_all_chunks<'c, R: ReadSeek>(reader: &mut R) -> WaversResult<ChunkManager
             })
         })?);
 
-        current_pos = reader.stream_position()? + chunk_size as u64;
-
+        // Add chunk info to manager
         chunk_manager.add_chunk_info(ChunkInfo::new(tag, offset as usize, chunk_size));
+
+        // Parse LIST chunks
+        if tag == crate::chunks::LIST {
+            // Save current position to restore after parsing
+            let saved_pos = reader.stream_position()?;
+            
+            // Parse the LIST chunk
+            match crate::chunks::list::ListChunk::parse(reader, chunk_size) {
+                Ok(list_chunk) => {
+                    chunk_manager.add_list_chunk(offset as usize, list_chunk);
+                }
+                Err(_e) => {
+                    // Log the error but don't fail the entire parsing
+                    #[cfg(feature = "log")]
+                    log::warn!("Failed to parse LIST chunk at offset {}: {}", offset, _e);
+                }
+            }
+            
+            // Restore position for next chunk
+            reader.seek(std::io::SeekFrom::Start(saved_pos))?;
+        }
+
+        current_pos = reader.stream_position()? + chunk_size as u64;
         reader.seek(std::io::SeekFrom::Start(current_pos))?;
     }
 
@@ -1573,13 +1950,8 @@ mod wav_tests {
             let fmt = wav.fmt_chunk();
 
             // write float
-            crate::write::<&Path, f32>(
-                &out,
-                &samples,
-                fmt.sample_rate as u32,
-                Some(fmt.channels),
-            )
-            .unwrap();
+            crate::write::<&Path, f32>(&out, &samples, fmt.sample_rate as u32, Some(fmt.channels))
+                .unwrap();
 
             // verify header
             let mut new_wav = Wav::from_reader(BufReader::new(File::open(&out).unwrap())).unwrap();

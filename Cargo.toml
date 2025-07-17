@@ -11,7 +11,6 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 memmap2 = "0.9.5"
 thiserror = "2.0.12"
-i24 = { version = "2.1.0", features = ["alloc"] }
 audio_samples = { path = "../audio_samples" }
 nom = "8.0.0"
 colored = { version = "3.0.0", optional = true }
@@ -20,6 +19,8 @@ num-traits = "0.2.19"
 num-complex = "0.4"
 ndarray = "0.16.1"
 log = { version = "0.4.22", optional = true }
+pyo3 = { version = "0.25.1", features = ["extension-module", "multiple-pymethods"], optional = true }
+numpy = { version = "0.25.0", optional = true }
 
 [dev-dependencies]
 hound = "3.5.1"
@@ -36,5 +37,6 @@ strip = true
 default = ["colored_output"]
 colored_output = ["dep:colored"]
 log = ["dep:log"]
-resample = ["audio_samples/resampling"]
+resample = []
+python = ["dep:pyo3", "dep:numpy", "audio_samples/python"]
 

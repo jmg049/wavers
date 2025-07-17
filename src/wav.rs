@@ -3,12 +3,12 @@ use crate::error::InternalError;
 use crate::{FormatCode, ReadSeek, WavIterators};
 use crate::{WaversErrorKind, WaversResult, wav_type::WavType};
 
+use audio_samples::I24DiskMethods;
 use audio_samples::operations::FadeCurve;
 use audio_samples::{
     AudioEditing, AudioProcessing, AudioSample, AudioSamples, AudioStatistics, AudioTransforms,
-    ConvertTo, I24, NormalizationMethod,
+    AudioTypeConversion, ConvertTo, I24, NormalizationMethod,
 };
-use i24::I24DiskMethods;
 use ndarray::Array2;
 use num_complex::Complex;
 
@@ -29,6 +29,52 @@ pub struct Wav<R: ReadSeek> {
     pub fmt_chunk: FmtChunk,
     // Performance optimization: cache for converted AudioSamples
     audio_samples_cache: HashMap<TypeId, Box<dyn std::any::Any + Send>>,
+}
+
+/// Helper function to conditionally use SIMD deinterleaving based on type support
+fn deinterleave_samples<T: AudioSample>(samples: &[T], channels: usize) -> Vec<T> {
+    // Try to use SIMD optimization if available
+    if let Some(simd_samples) = try_simd_deinterleave(samples, channels) {
+        return simd_samples;
+    }
+
+    // Fallback to generic implementation
+    let samples_per_channel = samples.len() / channels;
+    let mut deinterleaved = Vec::with_capacity(samples.len());
+
+    for channel_idx in 0..channels {
+        for sample_idx in 0..samples_per_channel {
+            deinterleaved.push(samples[sample_idx * channels + channel_idx]);
+        }
+    }
+
+    deinterleaved
+}
+
+/// Attempt SIMD deinterleaving - returns None if not supported for this type
+fn try_simd_deinterleave<T: AudioSample>(samples: &[T], channels: usize) -> Option<Vec<T>> {
+    // Use type erasure to check if we can use SIMD
+    use std::any::TypeId;
+
+    if TypeId::of::<T>() == TypeId::of::<f32>() {
+        let f32_samples = unsafe { std::mem::transmute::<&[T], &[f32]>(samples) };
+        let result = crate::simd::SimdAudioOps::deinterleave_multi(f32_samples, channels);
+        Some(unsafe { std::mem::transmute::<Vec<f32>, Vec<T>>(result) })
+    } else if TypeId::of::<T>() == TypeId::of::<f64>() {
+        let f64_samples = unsafe { std::mem::transmute::<&[T], &[f64]>(samples) };
+        let result = crate::simd::SimdAudioOps::deinterleave_multi(f64_samples, channels);
+        Some(unsafe { std::mem::transmute::<Vec<f64>, Vec<T>>(result) })
+    } else if TypeId::of::<T>() == TypeId::of::<i16>() {
+        let i16_samples = unsafe { std::mem::transmute::<&[T], &[i16]>(samples) };
+        let result = crate::simd::SimdAudioOps::deinterleave_multi(i16_samples, channels);
+        Some(unsafe { std::mem::transmute::<Vec<i16>, Vec<T>>(result) })
+    } else if TypeId::of::<T>() == TypeId::of::<i32>() {
+        let i32_samples = unsafe { std::mem::transmute::<&[T], &[i32]>(samples) };
+        let result = crate::simd::SimdAudioOps::deinterleave_multi(i32_samples, channels);
+        Some(unsafe { std::mem::transmute::<Vec<i32>, Vec<T>>(result) })
+    } else {
+        None
+    }
 }
 
 impl<R: ReadSeek> Wav<R> {
@@ -407,6 +453,10 @@ impl<R: ReadSeek> Wav<R> {
         self.read_samples(n_frames * self.fmt_chunk.channels as usize)
     }
 
+    pub fn sample_rate(&self) -> u32 {
+        self.fmt_chunk.sample_rate as u32
+    }
+
     pub fn info(&mut self) -> WavInfo {
         let data_chunk = *self.chunk_info.get_chunk_info(&DATA).unwrap();
         let fmt = self.fmt_chunk();
@@ -433,23 +483,24 @@ impl<R: ReadSeek> Wav<R> {
     /// or None if no INFO chunks are present.
     pub fn metadata(&self) -> WaversResult<Option<crate::chunks::WavMetadata>> {
         let metadata = self.chunk_info.extract_metadata()?;
-        
+
         // Check if any metadata fields are populated
-        if metadata.artist.is_some() || 
-           metadata.title.is_some() || 
-           metadata.copyright.is_some() ||
-           metadata.comment.is_some() ||
-           metadata.creation_date.is_some() ||
-           metadata.engineer.is_some() ||
-           metadata.genre.is_some() ||
-           metadata.keywords.is_some() ||
-           metadata.medium.is_some() ||
-           metadata.product.is_some() ||
-           metadata.subject.is_some() ||
-           metadata.software.is_some() ||
-           metadata.source.is_some() ||
-           metadata.source_form.is_some() ||
-           metadata.technician.is_some() {
+        if metadata.artist.is_some()
+            || metadata.title.is_some()
+            || metadata.copyright.is_some()
+            || metadata.comment.is_some()
+            || metadata.creation_date.is_some()
+            || metadata.engineer.is_some()
+            || metadata.genre.is_some()
+            || metadata.keywords.is_some()
+            || metadata.medium.is_some()
+            || metadata.product.is_some()
+            || metadata.subject.is_some()
+            || metadata.software.is_some()
+            || metadata.source.is_some()
+            || metadata.source_form.is_some()
+            || metadata.technician.is_some()
+        {
             Ok(Some(metadata))
         } else {
             Ok(None)
@@ -566,18 +617,21 @@ impl<R: ReadSeek> Wav<R> {
             return Ok(AudioSamples::new_mono(mono_array, sample_rate));
         }
 
-        // Multi-channel case
+        // Multi-channel case - conditionally use SIMD-optimized de-interleaving
         let samples_vec: Vec<T> = samples.into_vec();
         let samples_per_channel = samples_vec.len() / channels;
 
+        // Use SIMD-optimized de-interleaving when the type supports it
+        let deinterleaved = deinterleave_samples(&samples_vec, channels);
+
         // Create ndarray with shape (channels, samples_per_channel)
-        let array = ndarray::Array2::from_shape_vec((channels, samples_per_channel), samples_vec)
+        let array = ndarray::Array2::from_shape_vec((channels, samples_per_channel), deinterleaved)
             .map_err(|e| {
-            WaversErrorKind::Internal(InternalError::Bug(format!(
-                "Failed to create ndarray: {}",
-                e
-            )))
-        })?;
+                WaversErrorKind::Internal(InternalError::Bug(format!(
+                    "Failed to create ndarray: {}",
+                    e
+                )))
+            })?;
 
         Ok(AudioSamples::new_multi_channel(array, sample_rate))
     }
@@ -624,11 +678,7 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive
-            + num_traits::FromPrimitive
-            + num_traits::Float
-            + Clone
-            + 'static,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + Clone + 'static,
     {
         let mut audio_samples = self.to_audio_samples::<T>()?;
         let result = operations(&mut audio_samples)?;
@@ -652,11 +702,7 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive
-            + num_traits::FromPrimitive
-            + num_traits::Float
-            + Clone
-            + 'static,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + Clone + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         Ok(audio_samples.rms())
@@ -672,11 +718,7 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive
-            + num_traits::FromPrimitive
-            + num_traits::Float
-            + Clone
-            + 'static,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + Clone + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         Ok(audio_samples.peak())
@@ -693,11 +735,7 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive
-            + num_traits::FromPrimitive
-            + num_traits::Float
-            + Clone
-            + 'static,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + Clone + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         Ok(audio_samples.zero_crossings())
@@ -714,11 +752,7 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive
-            + num_traits::FromPrimitive
-            + num_traits::Float
-            + Clone
-            + 'static,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + Clone + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         Ok(audio_samples.zero_crossing_rate())
@@ -735,11 +769,7 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive
-            + num_traits::FromPrimitive
-            + num_traits::Float
-            + Clone
-            + 'static,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + Clone + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         audio_samples
@@ -758,11 +788,7 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive
-            + num_traits::FromPrimitive
-            + num_traits::Float
-            + Clone
-            + 'static,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + Clone + 'static,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         audio_samples
@@ -789,9 +815,11 @@ impl<R: ReadSeek> Wav<R> {
         T: num_traits::ToPrimitive
             + num_traits::FromPrimitive
             + num_traits::Zero
-            + num_traits::Float
+            + num_traits::One
             + Clone
             + 'static,
+        AudioSamples<f64>: AudioTypeConversion<T>,
+        AudioSamples<T>: AudioProcessing<T>,
     {
         let mut audio_samples = self.to_audio_samples::<T>()?;
         audio_samples
@@ -813,9 +841,10 @@ impl<R: ReadSeek> Wav<R> {
         T: num_traits::ToPrimitive
             + num_traits::FromPrimitive
             + num_traits::Zero
-            + num_traits::Float
+            + num_traits::One
             + Clone
             + 'static,
+        AudioSamples<T>: AudioProcessing<T>,
     {
         let mut audio_samples = self.to_audio_samples::<T>()?;
         audio_samples
@@ -837,9 +866,11 @@ impl<R: ReadSeek> Wav<R> {
         T: num_traits::ToPrimitive
             + num_traits::FromPrimitive
             + num_traits::Zero
-            + num_traits::Float
+            + num_traits::Zero
+            + num_traits::One
             + Clone
             + 'static,
+        AudioSamples<T>: AudioProcessing<T>,
     {
         let mut audio_samples = self.to_audio_samples::<T>()?;
         audio_samples
@@ -859,12 +890,8 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive
-            + num_traits::FromPrimitive
-            + num_traits::Zero
-            + num_traits::Float
-            + Clone
-            + 'static,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Zero + Clone + 'static,
+        AudioSamples<T>: AudioProcessing<T>,
     {
         let mut audio_samples = self.to_audio_samples::<T>()?;
         audio_samples
@@ -883,12 +910,8 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive
-            + num_traits::FromPrimitive
-            + num_traits::Zero
-            + num_traits::Float
-            + Clone
-            + 'static,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Zero + Clone + 'static,
+        AudioSamples<T>: AudioProcessing<T>,
     {
         let mut audio_samples = self.to_audio_samples::<T>()?;
         audio_samples
@@ -907,12 +930,8 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive
-            + num_traits::FromPrimitive
-            + num_traits::Zero
-            + num_traits::Float
-            + Clone
-            + 'static,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Zero + Clone + 'static,
+        AudioSamples<T>: AudioProcessing<T>,
     {
         let mut audio_samples = self.to_audio_samples::<T>()?;
         audio_samples
@@ -935,12 +954,8 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive
-            + num_traits::FromPrimitive
-            + num_traits::Zero
-            + num_traits::Float
-            + Clone
-            + 'static,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + num_traits::Zero + Clone + 'static,
+        AudioSamples<T>: AudioProcessing<T>,
     {
         let mut audio_samples = self.to_audio_samples::<T>()?;
         audio_samples
@@ -959,11 +974,8 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive
-            + num_traits::FromPrimitive
-            + num_traits::Float
-            + Clone
-            + 'static,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + Clone + 'static,
+        AudioSamples<T>: AudioTransforms<T>,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         audio_samples
@@ -989,11 +1001,8 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive
-            + num_traits::FromPrimitive
-            + num_traits::Float
-            + Clone
-            + 'static,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + Clone + 'static,
+        AudioSamples<T>: AudioTransforms<T>,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         audio_samples
@@ -1018,11 +1027,8 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive
-            + num_traits::FromPrimitive
-            + num_traits::Float
-            + Clone
-            + 'static,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + Clone + 'static,
+        AudioSamples<T>: AudioTransforms<T>,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         audio_samples
@@ -1041,11 +1047,8 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive
-            + num_traits::FromPrimitive
-            + num_traits::Float
-            + Clone
-            + 'static,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + Clone + 'static,
+        AudioSamples<T>: AudioTransforms<T>,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         audio_samples
@@ -1068,11 +1071,8 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive
-            + num_traits::FromPrimitive
-            + num_traits::Float
-            + Clone
-            + 'static,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + Clone + 'static,
+        AudioSamples<T>: AudioTransforms<T>,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         audio_samples
@@ -1093,11 +1093,8 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive
-            + num_traits::FromPrimitive
-            + num_traits::Float
-            + Clone
-            + 'static,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + Clone + 'static,
+        AudioSamples<T>: AudioEditing<T>,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         Ok(audio_samples.reverse())
@@ -1122,11 +1119,8 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive
-            + num_traits::FromPrimitive
-            + num_traits::Float
-            + Clone
-            + 'static,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + Clone + 'static,
+        AudioSamples<T>: AudioEditing<T>,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         audio_samples
@@ -1152,11 +1146,8 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive
-            + num_traits::FromPrimitive
-            + num_traits::Float
-            + Clone
-            + 'static,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + Clone + 'static,
+        AudioSamples<T>: AudioEditing<T>,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         audio_samples
@@ -1180,16 +1171,33 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive
-            + num_traits::FromPrimitive
-            + num_traits::Float
-            + Clone
-            + 'static,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + Clone + 'static,
+        AudioSamples<T>: AudioEditing<T>,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         audio_samples
             .split(segment_duration_seconds)
             .map_err(|e| WaversErrorKind::SampleError(e))
+    }
+
+    /// Returns the number of audio segments of specified duration after splitting.
+    ///
+    /// The last segment may be shorter if the audio doesn't divide evenly.
+    ///
+    /// # Arguments
+    /// * `segment_duration_seconds` - Duration of each segment
+    pub fn split_count<T: AudioSample>(&mut self, segment_duration_seconds: f64) -> usize
+    where
+        i16: ConvertTo<T>,
+        I24: ConvertTo<T>,
+        i32: ConvertTo<T>,
+        f32: ConvertTo<T>,
+        f64: ConvertTo<T>,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + Clone + 'static,
+    {
+        let wav_duration = self.info().duration;
+        let segment_count = (wav_duration as f64 / segment_duration_seconds).ceil() as usize;
+        segment_count
     }
 
     /// Repeats the audio signal a specified number of times.
@@ -1205,7 +1213,8 @@ impl<R: ReadSeek> Wav<R> {
         f64: ConvertTo<T>,
         T: num_traits::ToPrimitive
             + num_traits::FromPrimitive
-            + num_traits::Float
+            + num_traits::Zero
+            + num_traits::One
             + Clone
             + 'static,
     {
@@ -1226,11 +1235,8 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::ToPrimitive
-            + num_traits::FromPrimitive
-            + num_traits::Float
-            + Clone
-            + 'static,
+        T: num_traits::ToPrimitive + num_traits::FromPrimitive + 'static,
+        AudioSamples<T>: AudioEditing<T>,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         audio_samples
@@ -1256,7 +1262,8 @@ impl<R: ReadSeek> Wav<R> {
         f64: ConvertTo<T>,
         T: num_traits::ToPrimitive
             + num_traits::FromPrimitive
-            + num_traits::Float
+            + num_traits::Zero
+            + num_traits::One
             + Clone
             + 'static,
     {
@@ -1285,7 +1292,8 @@ impl<R: ReadSeek> Wav<R> {
         f64: ConvertTo<T>,
         T: num_traits::ToPrimitive
             + num_traits::FromPrimitive
-            + num_traits::Float
+            + num_traits::Zero
+            + num_traits::One
             + Clone
             + 'static,
     {
@@ -1312,11 +1320,18 @@ impl<R: ReadSeek> Wav<R> {
     where
         T: num_traits::ToPrimitive
             + num_traits::FromPrimitive
-            + num_traits::Float
             + Clone
+            + num_traits::Zero
+            + num_traits::One
             + 'static,
+        i16: ConvertTo<T>,
+        I24: ConvertTo<T>,
+        i32: ConvertTo<T>,
+        f32: ConvertTo<T>,
+        f64: ConvertTo<T>,
     {
-        AudioSamples::concatenate(segments).map_err(|e| WaversErrorKind::SampleError(e))
+        audio_samples::operations::AudioEditing::concatenate(segments)
+            .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     /// Mixes multiple AudioSamples together.
@@ -1335,11 +1350,27 @@ impl<R: ReadSeek> Wav<R> {
     where
         T: num_traits::ToPrimitive
             + num_traits::FromPrimitive
-            + num_traits::Float
             + Clone
+            + num_traits::Zero
+            + num_traits::One
             + 'static,
+        i16: ConvertTo<T>,
+        I24: ConvertTo<T>,
+        i32: ConvertTo<T>,
+        f32: ConvertTo<T>,
+        f64: ConvertTo<T>,
+        AudioSamples<f64>: AudioTypeConversion<T>,
+        AudioSamples<T>: AudioProcessing<T>,
     {
-        AudioSamples::mix(sources, weights).map_err(|e| WaversErrorKind::SampleError(e))
+        if sources.is_empty() {
+            return Err(WaversErrorKind::SampleError(
+                audio_samples::AudioSampleError::InvalidInput {
+                    msg: format!("No audio sources provided"),
+                },
+            ));
+        }
+        audio_samples::operations::AudioEditing::mix(sources, weights)
+            .map_err(|e| WaversErrorKind::SampleError(e))
     }
 
     // ===== RESAMPLING OPERATIONS =====
@@ -1374,7 +1405,9 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::Float + num_traits::FromPrimitive + num_traits::ToPrimitive + Clone + 'static,
+        T: num_traits::FromPrimitive + num_traits::ToPrimitive + Clone + 'static,
+        AudioSamples<f64>: AudioTypeConversion<T>,
+        AudioSamples<T>: AudioProcessing<T>,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         audio_samples
@@ -1408,7 +1441,9 @@ impl<R: ReadSeek> Wav<R> {
         i32: ConvertTo<T>,
         f32: ConvertTo<T>,
         f64: ConvertTo<T>,
-        T: num_traits::Float + num_traits::FromPrimitive + num_traits::ToPrimitive + Clone + 'static,
+        T: num_traits::FromPrimitive + num_traits::ToPrimitive + Clone + 'static,
+        AudioSamples<f64>: AudioTypeConversion<T>,
+        AudioSamples<T>: AudioProcessing<T>,
     {
         let audio_samples = self.to_audio_samples::<T>()?;
         audio_samples
@@ -1571,7 +1606,7 @@ fn find_all_chunks<'c, R: ReadSeek>(reader: &mut R) -> WaversResult<ChunkManager
         if tag == crate::chunks::LIST {
             // Save current position to restore after parsing
             let saved_pos = reader.stream_position()?;
-            
+
             // Parse the LIST chunk
             match crate::chunks::list::ListChunk::parse(reader, chunk_size) {
                 Ok(list_chunk) => {
@@ -1583,7 +1618,7 @@ fn find_all_chunks<'c, R: ReadSeek>(reader: &mut R) -> WaversResult<ChunkManager
                     log::warn!("Failed to parse LIST chunk at offset {}: {}", offset, _e);
                 }
             }
-            
+
             // Restore position for next chunk
             reader.seek(std::io::SeekFrom::Start(saved_pos))?;
         }

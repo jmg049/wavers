@@ -366,8 +366,12 @@ pub mod chunks;
 pub mod error;
 pub mod format_code;
 pub mod iter;
+pub mod simd;
 pub mod wav;
 pub mod wav_type;
+
+#[cfg(feature = "python")]
+pub mod python;
 
 /// Struct representing the `fmt` chunk and related funtionality.
 pub use crate::chunks::fmt::FmtChunk;
@@ -534,6 +538,68 @@ where
 ///     Ok(())
 /// }
 /// ```
+
+/// Helper function to conditionally use SIMD interleaving based on type support
+fn interleave_samples<T: AudioSample>(channel_data: &[&[T]], channels: usize) -> Vec<T> {
+    // Try to use SIMD optimization if available
+    if let Some(simd_samples) = try_simd_interleave(channel_data, channels) {
+        return simd_samples;
+    }
+
+    // Fallback to generic implementation
+    if channel_data.is_empty() {
+        return Vec::new();
+    }
+
+    let samples_per_channel = channel_data[0].len();
+    let mut interleaved = Vec::with_capacity(samples_per_channel * channels);
+
+    for sample_idx in 0..samples_per_channel {
+        for channel_idx in 0..channels {
+            interleaved.push(channel_data[channel_idx][sample_idx]);
+        }
+    }
+
+    interleaved
+}
+
+/// Attempt SIMD interleaving - returns None if not supported for this type
+fn try_simd_interleave<T: AudioSample>(channel_data: &[&[T]], channels: usize) -> Option<Vec<T>> {
+    use std::any::TypeId;
+
+    if TypeId::of::<T>() == TypeId::of::<f32>() {
+        let f32_channels: Vec<&[f32]> = channel_data
+            .iter()
+            .map(|ch| unsafe { std::mem::transmute::<&[T], &[f32]>(*ch) })
+            .collect();
+        let result = crate::simd::SimdAudioOps::interleave_multi(&f32_channels, channels);
+        Some(unsafe { std::mem::transmute::<Vec<f32>, Vec<T>>(result) })
+    } else if TypeId::of::<T>() == TypeId::of::<f64>() {
+        let f64_channels: Vec<&[f64]> = channel_data
+            .iter()
+            .map(|ch| unsafe { std::mem::transmute::<&[T], &[f64]>(*ch) })
+            .collect();
+        let result = crate::simd::SimdAudioOps::interleave_multi(&f64_channels, channels);
+        Some(unsafe { std::mem::transmute::<Vec<f64>, Vec<T>>(result) })
+    } else if TypeId::of::<T>() == TypeId::of::<i16>() {
+        let i16_channels: Vec<&[i16]> = channel_data
+            .iter()
+            .map(|ch| unsafe { std::mem::transmute::<&[T], &[i16]>(*ch) })
+            .collect();
+        let result = crate::simd::SimdAudioOps::interleave_multi(&i16_channels, channels);
+        Some(unsafe { std::mem::transmute::<Vec<i16>, Vec<T>>(result) })
+    } else if TypeId::of::<T>() == TypeId::of::<i32>() {
+        let i32_channels: Vec<&[i32]> = channel_data
+            .iter()
+            .map(|ch| unsafe { std::mem::transmute::<&[T], &[i32]>(*ch) })
+            .collect();
+        let result = crate::simd::SimdAudioOps::interleave_multi(&i32_channels, channels);
+        Some(unsafe { std::mem::transmute::<Vec<i32>, Vec<T>>(result) })
+    } else {
+        None
+    }
+}
+
 pub fn read_audio_with<T: AudioSample, R: ReadSeek>(reader: R) -> WaversResult<AudioSamples<T>>
 where
     i16: ConvertTo<T>,
@@ -626,7 +692,7 @@ where
     let samples = wav.read::<T>()?;
     let sample_rate = wav.fmt_chunk().sample_rate as u32;
     let channels = wav.fmt_chunk().channels;
-    
+
     Ok((samples, sample_rate, channels))
 }
 
@@ -834,27 +900,31 @@ where
     f64: ConvertTo<T>,
 {
     let bytes = if audio.is_mono() {
-        let mono_data = audio
-            .as_mono()
-            .ok_or(WaversErrorKind::Internal(crate::error::InternalError::Bug(
-                "Failed to extract mono data from AudioSamples".to_string(),
-            )))?;
+        let mono_data =
+            audio
+                .as_mono()
+                .ok_or(WaversErrorKind::Internal(crate::error::InternalError::Bug(
+                    "Failed to extract mono data from AudioSamples".to_string(),
+                )))?;
         T::to_bytes_slice(&mono_data.as_slice().unwrap())
     } else {
-        let multi_data = audio
-            .as_multi_channel()
-            .ok_or(WaversErrorKind::Internal(crate::error::InternalError::Bug(
+        let multi_data = audio.as_multi_channel().ok_or(WaversErrorKind::Internal(
+            crate::error::InternalError::Bug(
                 "Failed to extract multi-channel data from AudioSamples".to_string(),
-            )))?;
-        
-        // Convert to interleaved format for WAV
-        let (num_channels, num_samples) = multi_data.dim();
-        let mut interleaved = Vec::with_capacity(num_channels * num_samples);
-        for sample_idx in 0..num_samples {
-            for channel_idx in 0..num_channels {
-                interleaved.push(multi_data[(channel_idx, sample_idx)]);
-            }
+            ),
+        ))?;
+
+        // Convert to interleaved format for WAV using SIMD optimization
+        let (num_channels, _num_samples) = multi_data.dim();
+
+        // Create channel vectors for SIMD interleaving (avoiding lifetime issues)
+        let mut channel_vecs = Vec::with_capacity(num_channels);
+        for channel_idx in 0..num_channels {
+            channel_vecs.push(multi_data.row(channel_idx).to_vec());
         }
+
+        let channel_slices: Vec<&[T]> = channel_vecs.iter().map(|v| v.as_slice()).collect();
+        let interleaved = interleave_samples(&channel_slices, num_channels);
         T::to_bytes_slice(&interleaved)
     };
 
@@ -1056,6 +1126,21 @@ pub(crate) mod wav_api_tests {
     use std::path::Path;
     const ONE_CHANNEL_WAV_I16: &str = "./test_resources/one_channel_i16.wav";
     const ONE_CHANNEL_EXPECTED_I16: &str = "./test_resources/one_channel_i16.txt";
+
+    #[test]
+    fn test_write_ok() {
+        // Read a file, then write it
+        let mut audio =
+            crate::Wav::<BufReader<File>>::from_path("/home/jmg/code/rust/meet/test.wav")
+                .expect("read_audio failed");
+
+        let audio = audio.read_audio::<i16>().expect("read_audio failed");
+
+        let output_path = "./test_resources/test_output.wav";
+
+        crate::write_audio(output_path, &audio).expect("write_audio failed");
+    }
+
     // helper fn available to all sub‑modules
     pub(crate) fn read_text_to_vec<T: std::str::FromStr>(
         path: &Path,

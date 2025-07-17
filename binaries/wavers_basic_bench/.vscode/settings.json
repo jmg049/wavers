@@ -1,0 +1,17 @@
+{
+    "files.associations": {
+        "compare": "c",
+        "cstdint": "c",
+        "array": "c",
+        "complex": "c",
+        "functional": "c",
+        "ratio": "c",
+        "tuple": "c",
+        "type_traits": "c",
+        "utility": "c",
+        "sndfile.h": "c",
+        "stdlib.h": "c",
+        "stdio.h": "c",
+        "types.h": "c"
+    }
+}

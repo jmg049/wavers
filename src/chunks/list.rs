@@ -20,9 +20,9 @@
 //! - **wavl**: Wave list (for complex wave structures)
 
 use crate::{
+    WaversErrorKind, WaversResult,
     chunks::ChunkID,
     error::{ParseError, ValidationError},
-    WaversErrorKind, WaversResult,
 };
 use std::fmt::{Debug, Display};
 use std::io::{Read, Seek};
@@ -115,9 +115,13 @@ impl SubChunk {
     /// Returns the data as a null-terminated string if it contains valid UTF-8
     pub fn as_string(&self) -> Option<String> {
         // Find the first null byte or use the entire data
-        let end = self.data.iter().position(|&b| b == 0).unwrap_or(self.data.len());
+        let end = self
+            .data
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(self.data.len());
         let trimmed = &self.data[..end];
-        
+
         String::from_utf8(trimmed.to_vec()).ok()
     }
 
@@ -160,12 +164,12 @@ impl ListChunk {
             if offset + 4 > data.len() {
                 break;
             }
-            let id_bytes: [u8; 4] = data[offset..offset + 4]
-                .try_into()
-                .map_err(|_| WaversErrorKind::Parse(ParseError::Nom {
+            let id_bytes: [u8; 4] = data[offset..offset + 4].try_into().map_err(|_| {
+                WaversErrorKind::Parse(ParseError::Nom {
                     offset,
                     msg: "Failed to read sub-chunk ID".to_string(),
-                }))?;
+                })
+            })?;
             let id = ChunkID::new(id_bytes);
             offset += 4;
 
@@ -173,12 +177,12 @@ impl ListChunk {
             if offset + 4 > data.len() {
                 break;
             }
-            let size_bytes: [u8; 4] = data[offset..offset + 4]
-                .try_into()
-                .map_err(|_| WaversErrorKind::Parse(ParseError::Nom {
+            let size_bytes: [u8; 4] = data[offset..offset + 4].try_into().map_err(|_| {
+                WaversErrorKind::Parse(ParseError::Nom {
                     offset,
                     msg: "Failed to read sub-chunk size".to_string(),
-                }))?;
+                })
+            })?;
             let size = u32::from_le_bytes(size_bytes);
             offset += 4;
 
@@ -186,7 +190,11 @@ impl ListChunk {
             let data_end = offset + size as usize;
             if data_end > data.len() {
                 return Err(WaversErrorKind::Validate(ValidationError::InvalidWavFile {
-                    reason: format!("Sub-chunk data extends beyond LIST chunk boundaries: {} > {}", data_end, data.len()),
+                    reason: format!(
+                        "Sub-chunk data extends beyond LIST chunk boundaries: {} > {}",
+                        data_end,
+                        data.len()
+                    ),
                 }));
             }
 
@@ -209,8 +217,11 @@ impl ListChunk {
         if self.list_type != LIST_INFO {
             return Err(WaversErrorKind::Operation(
                 crate::error::OperationError::InvalidOp {
-                    reason: format!("Cannot extract metadata from non-INFO LIST chunk: {}", self.list_type),
-                }
+                    reason: format!(
+                        "Cannot extract metadata from non-INFO LIST chunk: {}",
+                        self.list_type
+                    ),
+                },
             ));
         }
 
@@ -253,7 +264,10 @@ impl ListChunk {
 
     /// Gets all sub-chunks with a specific ID
     pub fn get_sub_chunks(&self, id: &ChunkID) -> Vec<&SubChunk> {
-        self.sub_chunks.iter().filter(|chunk| chunk.id == *id).collect()
+        self.sub_chunks
+            .iter()
+            .filter(|chunk| chunk.id == *id)
+            .collect()
     }
 
     /// Returns true if this is an INFO LIST chunk
@@ -276,7 +290,7 @@ impl Display for ListChunk {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "LIST Chunk ({})", self.list_type)?;
         writeln!(f, "  Sub-chunks: {}", self.sub_chunks.len())?;
-        
+
         for (i, sub_chunk) in self.sub_chunks.iter().enumerate() {
             writeln!(f, "    [{}] {} ({} bytes)", i, sub_chunk.id, sub_chunk.size)?;
             if let Some(text) = sub_chunk.as_string() {
@@ -366,12 +380,12 @@ mod tests {
         // Create test data: "INFO" + IART chunk + INAM chunk
         let mut data = Vec::new();
         data.extend_from_slice(b"INFO"); // List type
-        
+
         // Add IART (Artist) sub-chunk
         data.extend_from_slice(b"IART"); // Sub-chunk ID
         data.extend_from_slice(&8u32.to_le_bytes()); // Size (including null terminator)
         data.extend_from_slice(b"TestArt\0"); // Data with null terminator
-        
+
         // Add INAM (Title) sub-chunk
         data.extend_from_slice(b"INAM"); // Sub-chunk ID
         data.extend_from_slice(&10u32.to_le_bytes()); // Size
@@ -380,11 +394,11 @@ mod tests {
         let mut cursor = Cursor::new(&data);
         let result = ListChunk::parse(&mut cursor, data.len() as u32);
         assert!(result.is_ok());
-        
+
         let list_chunk = result.unwrap();
         assert_eq!(list_chunk.list_type, LIST_INFO);
         assert_eq!(list_chunk.sub_chunks.len(), 2);
-        
+
         // Check metadata extraction
         let metadata = list_chunk.extract_metadata().unwrap();
         assert_eq!(metadata.artist, Some("TestArt".to_string()));
@@ -396,7 +410,7 @@ mod tests {
     fn test_sub_chunk_as_string() {
         let data = b"Hello\0World\0".to_vec();
         let sub_chunk = SubChunk::new(INFO_IART, data.len() as u32, data);
-        
+
         // Should return string up to first null terminator
         assert_eq!(sub_chunk.as_string(), Some("Hello".to_string()));
     }
@@ -406,7 +420,7 @@ mod tests {
         let mut metadata = WavMetadata::default();
         metadata.artist = Some("Test Artist".to_string());
         metadata.title = Some("Test Title".to_string());
-        
+
         let display_str = format!("{}", metadata);
         assert!(display_str.contains("Artist: Test Artist"));
         assert!(display_str.contains("Title: Test Title"));

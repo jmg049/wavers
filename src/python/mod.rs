@@ -1,97 +1,102 @@
-//! Python bindings for the Wavers library.
+//! Python bindings for the wavers library.
 //!
-//! This module provides Python bindings for Wavers' core WAV file reading and writing
-//! functionality, focusing on the AudioSamples-based API for seamless integration with
-//! the audio_samples crate's Python bindings.
+//! This module provides a comprehensive Python interface to the Rust wavers library,
+//! offering seamless access to WAV file I/O, audio processing, and analysis capabilities.
 //!
-//! ## Features
+//! ## Key Design Features
 //!
-//! - **AudioSamples Integration**: Direct integration with the audio_samples crate for
-//!   powerful audio processing capabilities.
-//! - **NumPy Support**: Efficient conversion between Rust and NumPy arrays.
-//! - **Multiple Data Types**: Support for i16, i32, f32, and f64 audio formats.
-//! - **High Performance**: Leverages Rust's performance for fast WAV file operations.
+//! - **Seamless Integration**: Built on top of the audio_samples crate for rich audio processing
+//! - **Type Safety**: Rust's type system ensures safe operations across the Python boundary
+//! - **Performance**: Efficient zero-copy operations where possible
+//! - **Pythonic API**: Intuitive method names and optional parameters with sensible defaults
+//! - **Error Handling**: Comprehensive error mapping from Rust to Python exceptions
 //!
-//! ## Usage Examples
+//! ## Module Structure
 //!
-//! ### Reading WAV Files
-//!
-//! ```python
-//! import wavers
-//! import numpy as np
-//!
-//! # Read as AudioSamples (recommended)
-//! audio = wavers.read_wav("audio.wav")
-//! print(f"Sample rate: {audio.sample_rate}")
-//! print(f"Channels: {audio.channels}")
-//! print(f"Duration: {audio.duration} seconds")
-//!
-//! # Read as NumPy array
-//! data, sample_rate = wavers.read_wav_numpy("audio.wav")
-//! print(f"Shape: {data.shape}")
-//! print(f"Sample rate: {sample_rate} Hz")
-//! print(f"Type: {type(data)})
-//! ```
-//!
-//! ### Writing WAV Files
-//!
-//! ```python
-//! import wavers
-//! import numpy as np
-//!
-//! # Write AudioSamples
-//! audio = wavers.read_wav("input.wav")
-//! processed = audio.normalize()  # Use audio_samples processing
-//! wavers.write_wav("output.wav", processed)
-//!
-//! # Write from NumPy array
-//! sample_rate = 44100
-//! duration = 1.0
-//! t = np.linspace(0, duration, int(sample_rate * duration))
-//! sine_wave = np.sin(2 * np.pi * 440 * t)  # 440 Hz sine wave
-//! wavers.write_wav_numpy("sine.wav", sine_wave, sample_rate)
-//! ```
-//!
-//! ### Getting WAV File Information
-//!
-//! ```python
-//! import wavers
-//!
-//! info = wavers.wav_info("audio.wav")
-//! print(f"Sample rate: {info.sample_rate} Hz")
-//! print(f"Channels: {info.channels}")
-//! print(f"Bits per sample: {info.bits_per_sample}")
-//! print(f"Duration: {info.duration:.3f} seconds")
-//! ```
+//! - **io**: Core I/O functions for reading and writing WAV files
+//! - **wav**: PyWav class providing the main interface for WAV file manipulation
+//! - **processing**: Audio processing methods (filters, normalization, etc.)
+//! - **analysis**: Audio analysis methods (RMS, spectral analysis, etc.)
+//! - **editing**: Audio editing operations (trim, pad, concatenate, etc.)
+//! - **conversions**: Type conversion utilities between Rust and Python
+//! - **utils**: Utility functions for NumPy integration and error handling
+//! - **errors**: Error handling and mapping from Rust to Python exceptions
 
 use pyo3::prelude::*;
+use pyo3::wrap_pyfunction;
 
+// Import submodules
+mod errors;
 mod utils;
+mod conversions;
+mod io;
 mod wav;
+mod processing;
+mod analysis;
+mod editing;
 
-pub use wav::*;
+// Re-export key components
+pub use errors::*;
+pub use utils::*;
+pub use conversions::*;
 
-/// Register the wavers Python module.
+/// Python module for wavers - High-performance WAV file processing
+///
+/// This module provides comprehensive WAV file I/O, audio processing, and analysis
+/// capabilities built on top of the fast Rust wavers library.
+///
+/// # Examples
+/// ```python
+/// import wavers
+/// 
+/// # Read a WAV file
+/// audio = wavers.read_wav("audio.wav")
+/// print(f"Sample rate: {audio.sample_rate}")
+/// print(f"Duration: {audio.duration:.2f} seconds")
+/// 
+/// # Process audio
+/// audio_normalized = audio.normalize()
+/// audio_filtered = audio.low_pass_filter(1000.0)
+/// 
+/// # Write processed audio
+/// wavers.write_wav("output.wav", audio_filtered)
+/// ```
 #[pymodule]
-fn wavers(_py: Python, m: &Bound<PyModule>) -> PyResult<()> {
-    // Add the main functions
-    m.add_function(wrap_pyfunction!(read_wav, m)?)?;
-    m.add_function(wrap_pyfunction!(write_wav, m)?)?;
-    m.add_function(wrap_pyfunction!(wav_info, m)?)?;
-
-    // Add NumPy integration functions
-    m.add_function(wrap_pyfunction!(read_wav_numpy, m)?)?;
-    m.add_function(wrap_pyfunction!(write_wav_numpy, m)?)?;
-
-    // Add the WavInfo class
-    m.add_class::<WavInfo>()?;
-
-    // Add module metadata
-    m.add("__version__", "0.1.0")?;
+fn wavers(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // Register the main PyWav class
+    m.add_class::<wav::PyWav>()?;
+    
+    // Register I/O functions
+    m.add_function(wrap_pyfunction!(io::read_wav, m)?)?;
+    m.add_function(wrap_pyfunction!(io::read_wav_raw, m)?)?;
+    m.add_function(wrap_pyfunction!(io::read_wav_bytes, m)?)?;
+    m.add_function(wrap_pyfunction!(io::write_wav, m)?)?;
+    m.add_function(wrap_pyfunction!(io::write_wav_raw, m)?)?;
+    m.add_function(wrap_pyfunction!(io::get_wav_info, m)?)?;
+    m.add_function(wrap_pyfunction!(io::get_wav_metadata, m)?)?;
+    
+    // Register utility functions
+    m.add_function(wrap_pyfunction!(utils::supported_sample_types, m)?)?;
+    m.add_function(wrap_pyfunction!(utils::library_version, m)?)?;
+    
+    // Add module constants
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    m.add("SUPPORTED_SAMPLE_TYPES", vec!["i16", "i32", "f32", "f64"])?;
+    m.add("SUPPORTED_FORMATS", vec!["PCM", "IEEE_FLOAT"])?;
+    
+    // Add module documentation
     m.add(
         "__doc__",
-        "High-performance WAV file reading and writing for Python",
+        "High-performance WAV file processing library with comprehensive audio analysis capabilities",
     )?;
+    
+    Ok(())
+}
 
+/// Register the wavers module with Python
+pub fn register_module(py: Python<'_>, parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
+    let wavers_module = PyModule::new(py, "wavers")?;
+    wavers(py, &wavers_module)?;
+    parent_module.add_submodule(&wavers_module)?;
     Ok(())
 }

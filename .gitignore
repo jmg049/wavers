@@ -5,3 +5,6 @@ benches/**/*.png
 
 .venv
 *.py
+
+*.json
+*.txt

@@ -8,3 +8,8 @@ dependencies = [
     "httpx>=0.28.1",
     "rich>=14.0.0",
 ]
+
+[tool.uv.workspace]
+members = [
+    "binaries/wavers_basic_bench",
+]

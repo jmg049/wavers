@@ -1,3 +1,9 @@
+---
+
+Archiving the crate since it has been replaced by the audio samples set of crates. See [audio_samples](https://github.com/jmg049/audio_samples)
+[audio_samples_io](https://github.com/jmg049/audio_samples_io) <- successor of wavers
+
+---
 
 <div style="text-align: center;" align="center">
 <h1>WaveRS - A Wav File Reader/Writer</h1>

@@ -7,6 +7,11 @@ use num_traits::Num;
 
 use crate::core::alloc_sample_buffer;
 
+const I24_MAX_F32: f32 = 8_388_607_f32;
+const I24_MAX_F64: f64 = 8_388_607_f64;
+const I24_MIN_F32: f32 = -8_388_608_f32;
+const I24_MIN_F64: f64 = -8_388_608_f64;
+
 /// Trait used to indicate that a type is an audio sample and can be treated as such.
 pub trait AudioSample:
     Copy
@@ -118,14 +123,14 @@ impl ConvertTo<i32> for i24 {
 impl ConvertTo<f32> for i24 {
     #[inline(always)]
     fn convert_to(&self) -> f32 {
-        (self.to_i32() as f32) / (i32::MAX as f32)
+        (self.to_i32() as f32) / I24_MAX_F32
     }
 }
 
 impl ConvertTo<f64> for i24 {
     #[inline(always)]
     fn convert_to(&self) -> f64 {
-        (self.to_i32() as f64) / (i32::MAX as f64)
+        (self.to_i32() as f64) / I24_MAX_F64
     }
 }
 
@@ -176,9 +181,7 @@ impl ConvertTo<i16> for f32 {
 impl ConvertTo<i24> for f32 {
     #[inline(always)]
     fn convert_to(&self) -> i24 {
-        i24::from_i32(
-            ((*self * (i32::MAX as f32)).clamp(i32::MIN as f32, i32::MAX as f32)).round() as i32,
-        )
+        i24::from_i32(((*self * (I24_MAX_F32)).clamp(I24_MIN_F32, I24_MAX_F32)).round() as i32)
     }
 }
 
@@ -214,9 +217,7 @@ impl ConvertTo<i16> for f64 {
 impl ConvertTo<i24> for f64 {
     #[inline(always)]
     fn convert_to(&self) -> i24 {
-        i24::from_i32(
-            ((*self * (i32::MAX as f64)).clamp(i32::MIN as f64, i32::MAX as f64)).round() as i32,
-        )
+        i24::from_i32(((*self * (I24_MAX_F64)).clamp(I24_MIN_F64, I24_MAX_F64)).round() as i32)
     }
 }
 
